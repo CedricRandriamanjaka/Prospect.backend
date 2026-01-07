@@ -10,6 +10,8 @@ OVERPASS_ENDPOINTS = [
     "https://overpass.private.coffee/api/interpreter",
     "https://overpass.kumi.systems/api/interpreter",
     "https://api.openstreetmap.fr/oapi/interpreter",
+    "https://overpass.openstreetmap.ru/api/interpreter",
+    "https://overpass.osm.rambler.ru/cgi/interpreter",
 ]
 
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
@@ -66,34 +68,62 @@ def _get_bbox(city: str, session: requests.Session) -> tuple[float, float, float
         "email": CONTACT_EMAIL,
     }
 
+    # Rate limiting pour Nominatim (1 requête par seconde max)
     time.sleep(1.0)
-    r = session.get(NOMINATIM_URL, params=params, headers=headers, timeout=20)
+    
+    try:
+        r = session.get(NOMINATIM_URL, params=params, headers=headers, timeout=20)
+        
+        if r.status_code == 403:
+            raise RuntimeError(
+                "Nominatim 403 Forbidden. Causes fréquentes:\n"
+                "  - VPN/proxy détecté\n"
+                "  - IP limitée (trop de requêtes)\n"
+                "Solutions: désactiver VPN, changer de réseau, attendre 10-30 min."
+            )
+        
+        if r.status_code == 429:
+            raise RuntimeError(
+                "Nominatim rate limit (429). Trop de requêtes.\n"
+                "Attendez 1-2 minutes et réessayez."
+            )
 
-    if r.status_code == 403:
-        raise RuntimeError(
-            "Nominatim 403. Causes fréquentes: VPN/proxy, IP limitée. "
-            "Essayer sans VPN, changer de réseau, attendre 10-30 min."
-        )
+        r.raise_for_status()
+        data = r.json()
+        
+        if not data or len(data) == 0:
+            raise RuntimeError(
+                f"Ville '{city}' introuvable dans Nominatim.\n"
+                "Essayez avec un nom plus spécifique (ex: 'Paris, France')."
+            )
 
-    r.raise_for_status()
-    data = r.json()
-    if not data:
-        raise RuntimeError(f"Ville introuvable: {city}")
+        south, north, west, east = map(float, data[0]["boundingbox"])
+        bbox = (south, west, north, east)
 
-    south, north, west, east = map(float, data[0]["boundingbox"])
-    bbox = (south, west, north, east)
+        cache[key] = [south, west, north, east]
+        _save_cache(cache)
 
-    cache[key] = [south, west, north, east]
-    _save_cache(cache)
-
-    return bbox
+        return bbox
+    
+    except requests.exceptions.Timeout:
+        raise RuntimeError(f"Timeout lors de la recherche de '{city}' dans Nominatim.")
+    except requests.exceptions.RequestException as e:
+        raise RuntimeError(f"Erreur réseau Nominatim pour '{city}': {e}")
 
 
 def _overpass_request(query: str, session: requests.Session) -> dict:
+    """
+    Fait une requête Overpass avec retry automatique sur plusieurs endpoints.
+    """
     last_err = None
+    errors_by_url = {}
 
-    for url in OVERPASS_ENDPOINTS:
-        for attempt in range(2):
+    # Mélanger les endpoints pour répartir la charge
+    endpoints = OVERPASS_ENDPOINTS.copy()
+    random.shuffle(endpoints)
+
+    for url in endpoints:
+        for attempt in range(3):  # 3 tentatives par endpoint
             try:
                 r = session.post(
                     url,
@@ -101,32 +131,85 @@ def _overpass_request(query: str, session: requests.Session) -> dict:
                     headers={
                         "Content-Type": "application/x-www-form-urlencoded",
                         "Accept": "application/json",
+                        "User-Agent": USER_AGENT,
                     },
-                    timeout=45,
+                    timeout=60,  # Timeout augmenté pour les grandes villes
                 )
+
+                if r.status_code == 429:
+                    # Rate limit - attendre plus longtemps
+                    wait_time = (2 ** attempt) * 2 + random.random()
+                    errors_by_url[url] = f"Rate limit (429), attente {wait_time:.1f}s"
+                    time.sleep(wait_time)
+                    continue
 
                 if r.status_code != 200:
                     last_err = f"{url} HTTP {r.status_code}: {r.text[:200]}"
+                    errors_by_url[url] = last_err
                     time.sleep((2 ** attempt) + random.random())
                     continue
 
-                return r.json()
+                # Vérifier que la réponse est valide JSON
+                try:
+                    data = r.json()
+                    if "elements" in data:
+                        return data
+                    else:
+                        last_err = f"{url} réponse invalide: pas de 'elements'"
+                        errors_by_url[url] = last_err
+                except json.JSONDecodeError:
+                    last_err = f"{url} réponse JSON invalide: {r.text[:200]}"
+                    errors_by_url[url] = last_err
+                    time.sleep((2 ** attempt) + random.random())
+                    continue
 
+            except requests.exceptions.Timeout:
+                last_err = f"{url} timeout après 60s"
+                errors_by_url[url] = last_err
+                time.sleep((2 ** attempt) + random.random())
+            except requests.exceptions.ConnectionError as e:
+                last_err = f"{url} erreur de connexion: {e}"
+                errors_by_url[url] = last_err
+                time.sleep((2 ** attempt) + random.random())
             except Exception as e:
                 last_err = f"{url}: {e}"
+                errors_by_url[url] = last_err
                 time.sleep((2 ** attempt) + random.random())
 
-    raise RuntimeError(f"Overpass indisponible. Dernière erreur: {last_err}")
+    # Tous les endpoints ont échoué
+    error_summary = "\n".join([f"  - {url}: {err}" for url, err in errors_by_url.items()])
+    raise RuntimeError(
+        f"Tous les endpoints Overpass sont indisponibles.\n"
+        f"Erreurs:\n{error_summary}\n"
+        f"Vérifiez votre connexion internet et réessayez dans quelques minutes."
+    )
 
 
 def get_prospects(city: str, number: int = 20) -> list[dict]:
-    number = max(1, int(number))
+    """
+    Récupère des prospects depuis OpenStreetMap pour une ville donnée.
+    
+    Args:
+        city: Nom de la ville (ex: "Paris", "New York")
+        number: Nombre de prospects à retourner (max recommandé: 100)
+    
+    Returns:
+        Liste de dictionnaires contenant les informations des prospects
+    """
+    number = max(1, min(int(number), 200))  # Limite à 200 pour éviter les timeouts
     session = requests.Session()
 
-    south, west, north, east = _get_bbox(city, session)
+    try:
+        south, west, north, east = _get_bbox(city, session)
+    except Exception as e:
+        raise RuntimeError(f"Impossible de trouver les coordonnées de '{city}': {e}")
 
+    # Requête Overpass améliorée avec plus de types de lieux
+    # On demande plus de résultats pour avoir plus de choix après filtrage
+    requested_count = min(number * 2, 500)
+    
     query = f"""
-    [out:json][timeout:25];
+    [out:json][timeout:60];
     (
       nwr["amenity"]["name"]({south},{west},{north},{east});
       nwr["shop"]["name"]({south},{west},{north},{east});
@@ -134,56 +217,95 @@ def get_prospects(city: str, number: int = 20) -> list[dict]:
       nwr["office"]["name"]({south},{west},{north},{east});
       nwr["craft"]["name"]({south},{west},{north},{east});
       nwr["leisure"]["name"]({south},{west},{north},{east});
+      nwr["healthcare"]["name"]({south},{west},{north},{east});
+      nwr["education"]["name"]({south},{west},{north},{east});
+      nwr["historic"]["name"]({south},{west},{north},{east});
+      nwr["aeroway"]["name"]({south},{west},{north},{east});
     );
-    out center {number};
+    out center {requested_count};
     """
 
-    data = _overpass_request(query, session)
+    try:
+        data = _overpass_request(query, session)
+    except Exception as e:
+        raise RuntimeError(f"Erreur lors de la requête Overpass pour '{city}': {e}")
+
     results = []
+    seen_names = set()  # Éviter les doublons par nom
 
     for el in data.get("elements", []):
         tags = el.get("tags", {})
+        name = tags.get("name")
+        
+        # Filtrer les éléments sans nom ou déjà vus
+        if not name or name in seen_names:
+            continue
+        seen_names.add(name)
 
         lat = el.get("lat") or (el.get("center") or {}).get("lat")
         lon = el.get("lon") or (el.get("center") or {}).get("lon")
+        
+        # Filtrer les éléments sans coordonnées
+        if not lat or not lon:
+            continue
 
+        # Déterminer le type d'activité (priorité aux types les plus pertinents)
         activity_key = None
-        for k in ["amenity", "shop", "tourism", "office", "craft", "leisure"]:
+        activity_value = None
+        for k in ["amenity", "shop", "tourism", "office", "craft", "leisure", 
+                  "healthcare", "education", "historic", "aeroway"]:
             if tags.get(k):
                 activity_key = k
+                activity_value = tags.get(k)
                 break
-        activity_value = tags.get(activity_key) if activity_key else None
 
-        website = tags.get("website") or tags.get("contact:website") or tags.get("url")
+        # Site web (plusieurs sources possibles)
+        website = (
+            tags.get("website") or 
+            tags.get("contact:website") or 
+            tags.get("url") or
+            tags.get("contact:url")
+        )
 
+        # Emails
         emails = []
-        for k in ["email", "contact:email"]:
+        for k in ["email", "contact:email", "contact:email_1", "contact:email_2"]:
             emails += _split_multi(tags.get(k, ""))
         emails = list(dict.fromkeys(emails))
 
+        # Téléphones (plusieurs sources)
         phones = []
-        for k in ["phone", "contact:phone", "mobile", "contact:mobile", "contact:whatsapp", "whatsapp"]:
+        for k in ["phone", "contact:phone", "mobile", "contact:mobile", 
+                 "contact:whatsapp", "whatsapp", "contact:fax", "fax"]:
             phones += _split_multi(tags.get(k, ""))
         phones = list(dict.fromkeys(phones))
 
+        # Adresse structurée
         address = {
             "housenumber": tags.get("addr:housenumber"),
             "street": tags.get("addr:street"),
             "postcode": tags.get("addr:postcode"),
-            "city": tags.get("addr:city"),
+            "city": tags.get("addr:city") or tags.get("addr:city:fr") or city,
             "country": tags.get("addr:country"),
         }
 
+        # Informations supplémentaires
         stars = tags.get("stars") or tags.get("hotel:stars")
         opening_hours = tags.get("opening_hours")
         operator_ = tags.get("operator")
         brand = tags.get("brand")
         cuisine = tags.get("cuisine")
+        
+        # Description/résumé si disponible
+        description = tags.get("description") or tags.get("note")
 
-        osm_link = f"https://www.openstreetmap.org/{el.get('type')}/{el.get('id')}"
+        # Lien OSM
+        el_type = el.get("type", "node")
+        el_id = el.get("id")
+        osm_link = f"https://www.openstreetmap.org/{el_type}/{el_id}" if el_id else None
 
         results.append({
-            "nom": tags.get("name"),
+            "nom": name,
             "activite_type": activity_key,
             "activite_valeur": activity_value,
             "site": website,
@@ -200,5 +322,9 @@ def get_prospects(city: str, number: int = 20) -> list[dict]:
             "osm": osm_link,
             "source": "OpenStreetMap",
         })
+        
+        # Arrêter si on a assez de résultats
+        if len(results) >= number:
+            break
 
     return results[:number]
