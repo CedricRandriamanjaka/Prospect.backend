@@ -576,7 +576,9 @@ def enrich_prospects(
     delay_seconds: float = 0.7,
     timeout: int = 15,
     return_meta: bool = False,
+    mode: str = "missing",  # <-- NEW: missing|always
 ) -> list[dict] | tuple[list[dict], dict]:
+
     """
     Ajouts:
       - dans chaque item:
@@ -608,7 +610,10 @@ def enrich_prospects(
             continue
 
         # enrichir si manque email/tel
-        if (p.get("emails") or []) and (p.get("telephones") or []):
+        mode = (mode or "missing").lower()
+
+        # mode=missing => skip si déjà email + phone
+        if mode == "missing" and (p.get("emails") or []) and (p.get("telephones") or []):
             continue
 
         p["enrich_attempted"] = True
@@ -680,6 +685,7 @@ def enrich_prospects(
 
     total_elapsed = time.perf_counter() - t_total0
     meta = {
+        "mode": mode,
         "enriched_count": enriched,
         "total_seconds": round(total_elapsed, 3),
         "avg_seconds": round((total_elapsed / enriched), 3) if enriched > 0 else 0.0,
