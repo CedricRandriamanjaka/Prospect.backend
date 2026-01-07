@@ -8,6 +8,7 @@ import requests
 # pip install phonenumbers
 try:
     import phonenumbers
+
     HAS_PHONENUMBERS = True
 except Exception:
     HAS_PHONENUMBERS = False
@@ -27,20 +28,15 @@ MAILTO_RE = re.compile(r"mailto:([^\"\'\?\s>]+)", re.IGNORECASE)
 # -------------------------
 # Regex: Phones
 # -------------------------
-# Fallback global (sur texte visible)
 PHONE_RE = re.compile(r"(?<!\d)(?:\+?\d[\d\s().-]{7,}\d)(?!\d)")
-
-# tel: liens (le plus fiable)
 TEL_LINK_RE = re.compile(r"tel:([+0-9][0-9\s().-]{5,})", re.IGNORECASE)
 
-# Extraction "dans un contexte téléphone"
 PHONE_CTX_RE = re.compile(
     r"(?:\b(?:tel|tél|téléphone|telephone|phone|mobile|call|hotline|whatsapp|support)\b\s*[:：]?\s*)"
     r"(\+?\d[\d\s().-]{7,}\d)",
     re.IGNORECASE,
 )
 
-# Contexte non-latin (ZH/JA/KO) courant
 PHONE_CTX_RE2 = re.compile(
     r"(?:电话|電話|联系我们|聯絡|聯絡我們|客服|客户服务|문의|고객센터|연락처|お問い合わせ|お問合せ)\s*[:：]?\s*(\+?\d[\d\s().-]{7,}\d)",
     re.IGNORECASE,
@@ -52,7 +48,7 @@ PHONE_CTX_RE2 = re.compile(
 # -------------------------
 WHATSAPP_RE = re.compile(
     r"(https?://(?:wa\.me/|api\.whatsapp\.com/|web\.whatsapp\.com/)[^\s\"\'<>]+)",
-    re.IGNORECASE
+    re.IGNORECASE,
 )
 
 
@@ -61,43 +57,93 @@ WHATSAPP_RE = re.compile(
 # -------------------------
 CONTACT_KEYWORDS = [
     # EN / FR
-    "contact", "contact-us", "contacts", "contactez", "contactez-nous",
-    "nous-contacter", "support", "help", "customer-service",
-    "about", "about-us", "a-propos", "apropos", "company",
-    "legal", "impressum", "mentions-legales", "privacy", "terms",
-
+    "contact",
+    "contact-us",
+    "contacts",
+    "contactez",
+    "contactez-nous",
+    "nous-contacter",
+    "support",
+    "help",
+    "customer-service",
+    "about",
+    "about-us",
+    "a-propos",
+    "apropos",
+    "company",
+    "legal",
+    "impressum",
+    "mentions-legales",
+    "privacy",
+    "terms",
     # ES / PT / IT
-    "contacto", "contato", "contatti", "assistenza", "chi-siamo", "acerca", "sobre",
-
+    "contacto",
+    "contato",
+    "contatti",
+    "assistenza",
+    "chi-siamo",
+    "acerca",
+    "sobre",
     # DE / NL
-    "kontakt", "kundenservice", "hilfe", "over-ons", "klantenservice",
-
+    "kontakt",
+    "kundenservice",
+    "hilfe",
+    "over-ons",
+    "klantenservice",
     # RU / UA
-    "контакты", "контакт", "поддержка", "о-нас",
-
+    "контакты",
+    "контакт",
+    "поддержка",
+    "о-нас",
     # AR
-    "اتصل", "اتصل-بنا", "تواصل", "الدعم", "من-نحن",
-
+    "اتصل",
+    "اتصل-بنا",
+    "تواصل",
+    "الدعم",
+    "من-نحن",
     # ZH
-    "联系", "联系我们", "聯絡", "聯絡我們", "客服", "客户服务", "關於", "关于我们",
-
+    "联系",
+    "联系我们",
+    "聯絡",
+    "聯絡我們",
+    "客服",
+    "客户服务",
+    "關於",
+    "关于我们",
     # JA
-    "お問い合わせ", "お問合せ", "会社概要", "サポート",
-
+    "お問い合わせ",
+    "お問合せ",
+    "会社概要",
+    "サポート",
     # KO
-    "문의", "고객센터", "연락처", "회사소개",
+    "문의",
+    "고객센터",
+    "연락처",
+    "회사소개",
 ]
 
 CONTACT_PATH_GUESSES = [
-    "/contact", "/contact-us", "/contacts", "/support", "/help",
-    "/a-propos", "/about", "/about-us",
-    "/mentions-legales", "/legal", "/impressum",
-    "/privacy", "/terms",
-
-    # ZH common
-    "/联系", "/联系我们", "/聯絡", "/聯絡我們",
+    "/contact",
+    "/contact-us",
+    "/contacts",
+    "/support",
+    "/help",
+    "/a-propos",
+    "/about",
+    "/about-us",
+    "/mentions-legales",
+    "/legal",
+    "/impressum",
+    "/privacy",
+    "/terms",
+    # ZH
+    "/联系",
+    "/联系我们",
+    "/聯絡",
+    "/聯絡我們",
     # JA / KO (rare)
-    "/お問い合わせ", "/문의",
+    "/お問い合わせ",
+    "/문의",
 ]
 
 
@@ -111,13 +157,13 @@ def _strip_scripts_and_styles(html: str) -> str:
         r"<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>",
         " ",
         html,
-        flags=re.IGNORECASE
+        flags=re.IGNORECASE,
     )
     html = re.sub(
         r"<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>",
         " ",
         html,
-        flags=re.IGNORECASE
+        flags=re.IGNORECASE,
     )
     return html
 
@@ -151,20 +197,47 @@ def _same_domain(a: str, b: str) -> bool:
 
 
 # -------------------------
-# HTTP fetch
+# HTTP fetch (avec timing)
 # -------------------------
-def _fetch_html(session: requests.Session, url: str, timeout: int = 15) -> str:
+def _fetch_html(session: requests.Session, url: str, timeout: int = 15) -> tuple[str, dict]:
+    """
+    Retourne (html, info):
+      info = {
+        url, ok, status_code, fetch_seconds, bytes, error
+      }
+    """
     headers = {
         "User-Agent": "prospect-com/0.1 (+contact: randriamanjakacedric@gmail.com)",
         "Accept": "text/html,application/xhtml+xml",
     }
+
+    t0 = time.perf_counter()
     try:
         r = session.get(url, headers=headers, timeout=timeout, allow_redirects=True)
-        if r.status_code >= 400:
-            return ""
-        return r.text or ""
-    except Exception:
-        return ""
+        elapsed = time.perf_counter() - t0
+
+        status = int(getattr(r, "status_code", 0) or 0)
+        txt = r.text or "" if status < 400 else ""
+        b = len(txt.encode("utf-8", errors="ignore")) if txt else 0
+
+        return txt, {
+            "url": url,
+            "ok": bool(status and status < 400),
+            "status_code": status,
+            "fetch_seconds": round(elapsed, 3),
+            "bytes": b,
+            "error": None if status < 400 else f"HTTP {status}",
+        }
+    except Exception as e:
+        elapsed = time.perf_counter() - t0
+        return "", {
+            "url": url,
+            "ok": False,
+            "status_code": 0,
+            "fetch_seconds": round(elapsed, 3),
+            "bytes": 0,
+            "error": str(e),
+        }
 
 
 # -------------------------
@@ -198,16 +271,8 @@ def _extract_emails(html: str) -> list[str]:
 
 # -------------------------
 # Phones: stratégie "fiable sans région"
-# -> On extrait des candidats, puis on garde UNIQUEMENT les numéros internationaux:
-#    +XXXXXXXX ou 00XXXXXXXX (converti en +)
-# -> Optionnel: validation avec phonenumbers (sans région si +...).
 # -------------------------
 def _is_plausible_candidate_phone(raw: str) -> bool:
-    """
-    Filtre anti faux positifs AVANT normalisation.
-    Ici on ne valide pas le pays (pas possible sans + / région),
-    on retire surtout les timestamps/coords.
-    """
     if not raw:
         return False
     s = (raw or "").strip()
@@ -232,13 +297,6 @@ def _is_plausible_candidate_phone(raw: str) -> bool:
 
 
 def keep_only_international_phones(candidates: list[str]) -> list[str]:
-    """
-    Garde uniquement:
-    - +XXXXXXXX
-    - 00XXXXXXXX -> +XXXXXXXX
-    Puis nettoie et valide longueur (E.164: 9..15 digits après +).
-    Si phonenumbers est installé: validation réelle.
-    """
     out = []
     seen = set()
 
@@ -255,7 +313,6 @@ def keep_only_international_phones(candidates: list[str]) -> list[str]:
         if not s.startswith("+"):
             continue
 
-        # Nettoyage minimal: + et chiffres uniquement
         cleaned = "+" + re.sub(r"\D", "", s[1:])
         digits = cleaned[1:]
 
@@ -266,7 +323,7 @@ def keep_only_international_phones(candidates: list[str]) -> list[str]:
         # Validation réelle si possible (sans région si +...)
         if HAS_PHONENUMBERS:
             try:
-                num = phonenumbers.parse(cleaned, None)  # région non nécessaire car +...
+                num = phonenumbers.parse(cleaned, None)
                 if not phonenumbers.is_possible_number(num):
                     continue
                 if not phonenumbers.is_valid_number(num):
@@ -337,7 +394,7 @@ def _find_contact_urls(base_url: str, html: str, limit: int = 3) -> list[str]:
     anchors = re.findall(
         r'<a[^>]+href=["\']([^"\']+)["\'][^>]*>(.*?)</a>',
         html,
-        flags=re.IGNORECASE | re.DOTALL
+        flags=re.IGNORECASE | re.DOTALL,
     )
 
     candidates = []
@@ -351,7 +408,9 @@ def _find_contact_urls(base_url: str, html: str, limit: int = 3) -> list[str]:
         text_clean = re.sub(r"\s+", " ", text_clean).strip().lower()
         href_lower = h.lower()
 
-        if any(k.lower() in href_lower for k in CONTACT_KEYWORDS) or any(k.lower() in text_clean for k in CONTACT_KEYWORDS):
+        if any(k.lower() in href_lower for k in CONTACT_KEYWORDS) or any(
+            k.lower() in text_clean for k in CONTACT_KEYWORDS
+        ):
             full = urljoin(base_url, h)
             if _same_domain(base_url, full):
                 candidates.append(full)
@@ -365,7 +424,7 @@ def _find_contact_urls(base_url: str, html: str, limit: int = 3) -> list[str]:
 
 
 # -------------------------
-# Public API
+# Public API: enrichissement d'un site + détails timing
 # -------------------------
 def enrich_contacts_from_website(
     website: str,
@@ -375,35 +434,78 @@ def enrich_contacts_from_website(
     delay_seconds: float = 0.7,
 ) -> dict:
     """
-    Scraping light:
-    - page d'accueil
-    - + pages contact (si trouvées)
-    Retourne: emails, telephones, whatsapp, visited_urls
+    Retourne:
+      - emails, telephones, whatsapp, visited_urls
+      - timing: détails par page (fetch + extract) + sleep + discovery
     """
+    t0_total = time.perf_counter()
+
     website = _normalize_url(website)
     if not website:
-        return {"emails": [], "telephones": [], "whatsapp": [], "visited_urls": []}
+        return {
+            "emails": [],
+            "telephones": [],
+            "whatsapp": [],
+            "visited_urls": [],
+            "timing": {
+                "total_seconds": 0.0,
+                "sleep_seconds": 0.0,
+                "find_contact_urls_seconds": 0.0,
+                "pages": [],
+            },
+        }
 
     s = session or requests.Session()
+
     visited: list[str] = []
     emails: list[str] = []
     phones: list[str] = []
     whatsapp: list[str] = []
+
+    timing_pages: list[dict] = []
+    sleep_seconds_total = 0.0
 
     def merge_unique(target: list[str], items: list[str]):
         for it in items:
             if it and it not in target:
                 target.append(it)
 
+    def extract_all(html: str) -> tuple[list[str], list[str], list[str], float]:
+        t_ex0 = time.perf_counter()
+        e = _extract_emails(html)
+        p = _extract_phones(html)
+        w = _extract_whatsapp(html)
+        ex_sec = time.perf_counter() - t_ex0
+        return e, p, w, ex_sec
+
     # 1) homepage
-    html = _fetch_html(s, website, timeout=timeout)
+    html, info = _fetch_html(s, website, timeout=timeout)
     visited.append(website)
-    merge_unique(emails, _extract_emails(html))
-    merge_unique(phones, _extract_phones(html))
-    merge_unique(whatsapp, _extract_whatsapp(html))
+
+    e, p, w, ex_sec = extract_all(html)
+    merge_unique(emails, e)
+    merge_unique(phones, p)
+    merge_unique(whatsapp, w)
+
+    timing_pages.append(
+        {
+            "url": website,
+            "fetch_seconds": info["fetch_seconds"],
+            "status_code": info["status_code"],
+            "ok": info["ok"],
+            "bytes": info["bytes"],
+            "extract_seconds": round(ex_sec, 3),
+            "emails_found": len(e),
+            "phones_found": len(p),
+            "whatsapp_found": len(w),
+            "error": info["error"],
+        }
+    )
 
     # 2) pages "contact"
+    t_find0 = time.perf_counter()
     contact_urls = _find_contact_urls(website, html, limit=max_pages - 1)
+    find_contact_urls_seconds = time.perf_counter() - t_find0
 
     # fallback: chemins connus
     if not contact_urls:
@@ -413,12 +515,32 @@ def enrich_contacts_from_website(
                 break
 
     for u in contact_urls:
+        t_sleep0 = time.perf_counter()
         time.sleep(delay_seconds)
-        html2 = _fetch_html(s, u, timeout=timeout)
+        sleep_seconds_total += time.perf_counter() - t_sleep0
+
+        html2, info2 = _fetch_html(s, u, timeout=timeout)
         visited.append(u)
-        merge_unique(emails, _extract_emails(html2))
-        merge_unique(phones, _extract_phones(html2))
-        merge_unique(whatsapp, _extract_whatsapp(html2))
+
+        e2, p2, w2, ex2_sec = extract_all(html2)
+        merge_unique(emails, e2)
+        merge_unique(phones, p2)
+        merge_unique(whatsapp, w2)
+
+        timing_pages.append(
+            {
+                "url": u,
+                "fetch_seconds": info2["fetch_seconds"],
+                "status_code": info2["status_code"],
+                "ok": info2["ok"],
+                "bytes": info2["bytes"],
+                "extract_seconds": round(ex2_sec, 3),
+                "emails_found": len(e2),
+                "phones_found": len(p2),
+                "whatsapp_found": len(w2),
+                "error": info2["error"],
+            }
+        )
 
         # stop tôt si on a déjà trouvé email + tel
         if emails and phones:
@@ -429,25 +551,53 @@ def enrich_contacts_from_website(
     phones = list(dict.fromkeys(phones))
     whatsapp = list(dict.fromkeys(whatsapp))
 
+    total_seconds = time.perf_counter() - t0_total
+
     return {
         "emails": emails,
-        "telephones": phones,   # <-- uniquement +... (ou 00... converti)
+        "telephones": phones,  # uniquement +... (ou 00... converti)
         "whatsapp": whatsapp,
         "visited_urls": visited,
+        "timing": {
+            "total_seconds": round(total_seconds, 3),
+            "sleep_seconds": round(sleep_seconds_total, 3),
+            "find_contact_urls_seconds": round(find_contact_urls_seconds, 3),
+            "pages": timing_pages,
+        },
     }
 
 
+# -------------------------
+# Public API: enrichissement de prospects + timings détaillés par item
+# -------------------------
 def enrich_prospects(
     prospects: list[dict],
     max_enrich: int = 10,
     delay_seconds: float = 0.7,
     timeout: int = 15,
-) -> list[dict]:
+    return_meta: bool = False,
+) -> list[dict] | tuple[list[dict], dict]:
     """
-    Enrichit seulement une partie des prospects pour éviter les timeouts.
+    Ajouts:
+      - dans chaque item:
+        enrich_attempted (bool)
+        enrich_seconds (float|None)
+        enrich_error (str|None)
+        enrich_details (dict)  <-- détails timing + pages
+      - meta:
+        per_item[] contient aussi les détails
     """
+    t_total0 = time.perf_counter()
+
     s = requests.Session()
     enriched = 0
+    per_item: list[dict] = []
+
+    for p in prospects:
+        p.setdefault("enrich_attempted", False)
+        p.setdefault("enrich_seconds", None)
+        p.setdefault("enrich_error", None)
+        p.setdefault("enrich_details", None)
 
     for p in prospects:
         if enriched >= max_enrich:
@@ -461,22 +611,82 @@ def enrich_prospects(
         if (p.get("emails") or []) and (p.get("telephones") or []):
             continue
 
-        time.sleep(delay_seconds)
-        extra = enrich_contacts_from_website(
-            site,
-            session=s,
-            max_pages=3,
-            timeout=timeout,
-            delay_seconds=delay_seconds,
-        )
+        p["enrich_attempted"] = True
+        t_item0 = time.perf_counter()
 
-        # merge
-        p["emails"] = list(dict.fromkeys((p.get("emails") or []) + (extra.get("emails") or [])))
-        merged_phones = (p.get("telephones") or []) + (extra.get("telephones") or [])
-        p["telephones"] = keep_only_international_phones(merged_phones)
-        p["whatsapp"] = list(dict.fromkeys((p.get("whatsapp") or []) + (extra.get("whatsapp") or [])))
-        p["scraped_urls"] = extra.get("visited_urls", [])
+        before_emails = set(p.get("emails") or [])
+        before_phones = set(p.get("telephones") or [])
+        before_whatsapp = set(p.get("whatsapp") or [])
+
+        details = None
+
+        try:
+            extra = enrich_contacts_from_website(
+                site,
+                session=s,
+                max_pages=3,
+                timeout=timeout,
+                delay_seconds=delay_seconds,
+            )
+
+            details = extra.get("timing") or {}
+
+            # merge
+            p["emails"] = list(dict.fromkeys((p.get("emails") or []) + (extra.get("emails") or [])))
+            merged_phones = (p.get("telephones") or []) + (extra.get("telephones") or [])
+            p["telephones"] = keep_only_international_phones(merged_phones)
+            p["whatsapp"] = list(dict.fromkeys((p.get("whatsapp") or []) + (extra.get("whatsapp") or [])))
+            p["scraped_urls"] = extra.get("visited_urls", [])
+
+        except Exception as e:
+            p["enrich_error"] = str(e)
+
+        elapsed = time.perf_counter() - t_item0
+        p["enrich_seconds"] = round(elapsed, 3)
+
+        # enrich_details dans le résultat (par item)
+        after_emails = set(p.get("emails") or [])
+        after_phones = set(p.get("telephones") or [])
+        after_whatsapp = set(p.get("whatsapp") or [])
+
+        p["enrich_details"] = {
+            "total_seconds": p["enrich_seconds"],
+            "sleep_seconds": float((details or {}).get("sleep_seconds") or 0.0),
+            "find_contact_urls_seconds": float((details or {}).get("find_contact_urls_seconds") or 0.0),
+            "pages": (details or {}).get("pages") or [],
+            "added": {
+                "emails": len(after_emails - before_emails),
+                "telephones": len(after_phones - before_phones),
+                "whatsapp": len(after_whatsapp - before_whatsapp),
+            },
+        }
+
+        # meta per_item (plus de détails)
+        per_item.append(
+            {
+                "nom": p.get("nom"),
+                "site": site,
+                "enrich_seconds": p["enrich_seconds"],
+                "added": p["enrich_details"]["added"],
+                "pages_count": len(p["enrich_details"]["pages"]),
+                "sleep_seconds": p["enrich_details"]["sleep_seconds"],
+                "find_contact_urls_seconds": p["enrich_details"]["find_contact_urls_seconds"],
+                "pages": p["enrich_details"]["pages"],
+                "error": p.get("enrich_error"),
+            }
+        )
 
         enriched += 1
 
+    total_elapsed = time.perf_counter() - t_total0
+    meta = {
+        "enriched_count": enriched,
+        "total_seconds": round(total_elapsed, 3),
+        "avg_seconds": round((total_elapsed / enriched), 3) if enriched > 0 else 0.0,
+        "per_item": per_item,
+        "max_enrich": max_enrich,
+    }
+
+    if return_meta:
+        return prospects, meta
     return prospects

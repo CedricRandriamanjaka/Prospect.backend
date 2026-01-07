@@ -2,7 +2,8 @@ import json
 import time
 import random
 import re
-from pathlib import Path
+import os
+from threading import Lock
 from typing import Optional, Dict, Any, List, Tuple
 
 import requests
@@ -17,12 +18,10 @@ OVERPASS_ENDPOINTS = [
 ]
 
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
-CACHE_FILE = "bbox_cache.json"
 
 USER_AGENT = "prospect-com/0.1 (contact: randriamanjakacedric@gmail.com)"
 CONTACT_EMAIL = "randriamanjakacedric@gmail.com"
 
-# Tags OSM supportés (clés)
 ALL_KEYS = [
     "amenity",
     "shop",
@@ -36,22 +35,44 @@ ALL_KEYS = [
     "aeroway",
 ]
 
-
 # -------------------------
-# Cache
+# Cache bbox en mémoire (pas de fichier)
 # -------------------------
-def _load_cache() -> dict:
-    p = Path(CACHE_FILE)
-    if not p.exists():
-        return {}
-    try:
-        return json.loads(p.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
+_BBOX_CACHE_TTL_SECONDS = int(os.getenv("BBOX_CACHE_TTL_SECONDS", "86400"))  # 24h par défaut
+_BBOX_CACHE_MAX_ITEMS = int(os.getenv("BBOX_CACHE_MAX_ITEMS", "5000"))
+_BBOX_CACHE: dict[str, tuple[float, dict]] = {}  # key -> (expires_at_epoch, value)
+_BBOX_CACHE_LOCK = Lock()
 
 
-def _save_cache(cache: dict) -> None:
-    Path(CACHE_FILE).write_text(json.dumps(cache, ensure_ascii=False, indent=2), encoding="utf-8")
+def _bbox_cache_get(key: str) -> Optional[dict]:
+    now = time.time()
+    with _BBOX_CACHE_LOCK:
+        item = _BBOX_CACHE.get(key)
+        if not item:
+            return None
+        expires_at, value = item
+        if expires_at <= now:
+            _BBOX_CACHE.pop(key, None)
+            return None
+        return value
+
+
+def _bbox_cache_set(key: str, value: dict) -> None:
+    now = time.time()
+    expires_at = now + _BBOX_CACHE_TTL_SECONDS
+
+    with _BBOX_CACHE_LOCK:
+        _BBOX_CACHE[key] = (expires_at, value)
+
+        # nettoyage : expirés d'abord
+        if len(_BBOX_CACHE) > _BBOX_CACHE_MAX_ITEMS:
+            for k, (exp, _) in list(_BBOX_CACHE.items()):
+                if exp <= now:
+                    _BBOX_CACHE.pop(k, None)
+
+        # si toujours trop grand, éviction FIFO (ordre d’insertion dict)
+        while len(_BBOX_CACHE) > _BBOX_CACHE_MAX_ITEMS:
+            _BBOX_CACHE.pop(next(iter(_BBOX_CACHE)))
 
 
 # -------------------------
@@ -71,17 +92,6 @@ def _split_multi(value: str) -> list[str]:
 
 
 def _parse_tags_param(tags: Optional[str]) -> List[Dict[str, Optional[str]]]:
-    """
-    tags peut être:
-      - None => défaut: ALL_KEYS (sans valeur)
-      - "restaurant,hotel" => valeurs (match sur toutes les clés)
-      - "amenity=restaurant,tourism=hotel" => clé=valeur
-      - "amenity,shop" => clés (toutes valeurs)
-    Retour: liste d'objets:
-      {"key": "amenity", "value": None}           -> clé seule
-      {"key": "amenity", "value": "restaurant"}  -> clé=valeur
-      {"key": None, "value": "restaurant"}       -> valeur seule (sur toutes clés)
-    """
     if not tags or not tags.strip():
         return [{"key": k, "value": None} for k in ALL_KEYS]
 
@@ -96,18 +106,14 @@ def _parse_tags_param(tags: Optional[str]) -> List[Dict[str, Optional[str]]]:
             k = k.strip().lower()
             v = v.strip()
             if k not in ALL_KEYS:
-                raise ValueError(
-                    f"Tag clé inconnue: '{k}'. Clés autorisées: {', '.join(ALL_KEYS)}"
-                )
+                raise ValueError(f"Tag clé inconnue: '{k}'. Clés autorisées: {', '.join(ALL_KEYS)}")
             out.append({"key": k, "value": v})
             continue
 
-        # si c'est une clé OSM
         low = t.lower()
         if low in ALL_KEYS:
             out.append({"key": low, "value": None})
         else:
-            # sinon valeur "libre" (restaurant, hotel, spa...)
             out.append({"key": None, "value": t})
 
     if not out:
@@ -118,14 +124,13 @@ def _parse_tags_param(tags: Optional[str]) -> List[Dict[str, Optional[str]]]:
 
 def _geocode(where: str, session: requests.Session) -> Dict[str, Any]:
     key = where.strip().lower()
-    cache = _load_cache()
 
-    v = cache.get(key)
-    if isinstance(v, dict) and "bbox" in v and len(v["bbox"]) == 4:
-        return v
-    if isinstance(v, list) and len(v) == 4:
-        s, w, n, e = v
-        return {"bbox": [s, w, n, e], "lat": None, "lon": None, "display": where}
+    cached = _bbox_cache_get(key)
+    if isinstance(cached, dict) and "bbox" in cached and len(cached["bbox"]) == 4:
+        # marquer le hit sans casser les usages existants
+        out = dict(cached)
+        out["cache_hit"] = True
+        return out
 
     headers = {
         "User-Agent": USER_AGENT,
@@ -173,10 +178,10 @@ def _geocode(where: str, session: requests.Session) -> Dict[str, Any]:
         "lat": lat,
         "lon": lon,
         "display": item.get("display_name") or where,
+        "cache_hit": False,
     }
 
-    cache[key] = out
-    _save_cache(cache)
+    _bbox_cache_set(key, out)
     return out
 
 
@@ -245,26 +250,17 @@ def _overpass_request(query: str, session: requests.Session) -> dict:
     )
 
 
-# -------------------------
-# Query builder (bbox / around) avec tags
-# -------------------------
 def _filters_to_overpass_parts(filters: List[Dict[str, Optional[str]]], area_expr: str) -> List[str]:
-    """
-    area_expr = "(south,west,north,east)" OU "(around:radius,lat,lon)"
-    """
     parts: List[str] = []
     for f in filters:
         k = f.get("key")
         v = f.get("value")
 
         if k and v:
-            # clé=valeur
             parts.append(f'nwr["{k}"="{v}"]["name"]{area_expr};')
         elif k and not v:
-            # clé seule
             parts.append(f'nwr["{k}"]["name"]{area_expr};')
         else:
-            # valeur seule: on la tente sur toutes les clés
             if not v:
                 continue
             for kk in ALL_KEYS:
@@ -299,9 +295,6 @@ def _build_query_around(filters: List[Dict[str, Optional[str]]], lat: float, lon
     """
 
 
-# -------------------------
-# Parsing
-# -------------------------
 def _parse_elements(data: dict, fallback_city: str) -> list[dict]:
     results = []
     seen_names = set()
@@ -384,9 +377,6 @@ def _parse_elements(data: dict, fallback_city: str) -> list[dict]:
     return results
 
 
-# -------------------------
-# Public API
-# -------------------------
 def get_prospects(
     where: Optional[str] = None,
     city: Optional[str] = None,
@@ -396,17 +386,6 @@ def get_prospects(
     tags: Optional[str] = None,
     number: int = 20,
 ) -> Tuple[List[dict], Dict[str, Any]]:
-    """
-    Modes:
-      - where/city sans radius -> bbox
-      - where/city + radius -> around (centre Nominatim)
-      - lat/lon (+ radius) -> around
-    tags:
-      - None => ALL_KEYS
-      - "restaurant,hotel" => valeurs sur toutes clés
-      - "amenity=restaurant,tourism=hotel" => clé=valeur
-      - "amenity,shop" => clés
-    """
     number = max(1, min(int(number), 200))
     requested_count = min(number * 2, 500)
 
@@ -415,7 +394,6 @@ def get_prospects(
 
     filters = _parse_tags_param(tags)
 
-    # Mode clic carte
     if lat is not None and lon is not None:
         used_radius_km = float(radius_km) if radius_km is not None else 5.0
         used_radius_km = max(0.2, min(used_radius_km, 50.0))
@@ -435,13 +413,11 @@ def get_prospects(
         }
         return results[:number], meta
 
-    # Mode texte
     if not query_text:
         raise ValueError("Paramètres requis: where=... OU lat/lon.")
 
     geo = _geocode(query_text, s)
 
-    # where + radius -> around
     if radius_km is not None:
         used_radius_km = max(0.2, min(float(radius_km), 50.0))
         radius_m = int(used_radius_km * 1000)
@@ -465,10 +441,10 @@ def get_prospects(
             "lon": g_lon,
             "radius_km": used_radius_km,
             "tags": filters,
+            "geocode_cache_hit": bool(geo.get("cache_hit")),
         }
         return results[:number], meta
 
-    # where -> bbox
     south, west, north, east = map(float, geo["bbox"])
     q = _build_query_bbox(filters, south, west, north, east, requested_count)
     data = _overpass_request(q, s)
@@ -480,5 +456,6 @@ def get_prospects(
         "display": geo.get("display"),
         "bbox": [south, west, north, east],
         "tags": filters,
+        "geocode_cache_hit": bool(geo.get("cache_hit")),
     }
     return results[:number], meta
