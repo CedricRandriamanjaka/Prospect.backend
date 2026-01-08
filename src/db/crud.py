@@ -3,7 +3,7 @@ from typing import List, Optional, Tuple
 from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 from sqlalchemy import select
-from prospect.models import CityBBox, Prospect, SearchCache
+from src.model.models import CityBBox, Prospect, SearchCache
 
 
 def get_or_create_bbox(db: Session, city: str, bbox: Tuple[float, float, float, float]) -> CityBBox:
