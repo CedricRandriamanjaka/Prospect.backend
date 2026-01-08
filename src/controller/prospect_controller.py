@@ -78,7 +78,6 @@ class ProspectController:
             "enriched_count": 0,
             "total_seconds": 0.0,
             "avg_seconds": 0.0,
-            "per_item": [],
             "max_enrich": enrich_max,
             "mode": enrich_mode,
         }

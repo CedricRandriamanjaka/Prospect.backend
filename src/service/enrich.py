@@ -587,13 +587,11 @@ def enrich_prospects(
         enrich_error (str|None)
         enrich_details (dict)  <-- détails timing + pages
       - meta:
-        per_item[] contient aussi les détails
     """
     t_total0 = time.perf_counter()
 
     s = requests.Session()
     enriched = 0
-    per_item: list[dict] = []
 
     for p in prospects:
         p.setdefault("enrich_attempted", False)
@@ -666,20 +664,6 @@ def enrich_prospects(
             },
         }
 
-        # meta per_item (plus de détails)
-        per_item.append(
-            {
-                "nom": p.get("nom"),
-                "site": site,
-                "enrich_seconds": p["enrich_seconds"],
-                "added": p["enrich_details"]["added"],
-                "pages_count": len(p["enrich_details"]["pages"]),
-                "sleep_seconds": p["enrich_details"]["sleep_seconds"],
-                "find_contact_urls_seconds": p["enrich_details"]["find_contact_urls_seconds"],
-                "pages": p["enrich_details"]["pages"],
-                "error": p.get("enrich_error"),
-            }
-        )
 
         enriched += 1
 
@@ -689,7 +673,6 @@ def enrich_prospects(
         "enriched_count": enriched,
         "total_seconds": round(total_elapsed, 3),
         "avg_seconds": round((total_elapsed / enriched), 3) if enriched > 0 else 0.0,
-        "per_item": per_item,
         "max_enrich": max_enrich,
     }
 
