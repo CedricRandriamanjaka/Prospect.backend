@@ -506,9 +506,11 @@ def _find_contact_urls(base_url: str, html: str, limit: int = 3) -> list[str]:
 # -------------------------
 # Cache: fonctions de lecture/écriture
 # -------------------------
-def _get_cached_enrichment(website: str, max_age_days: int = 30) -> Optional[Dict[str, Any]]:
+def _get_cached_enrichment(website: str) -> Optional[Dict[str, Any]]:
     """
-    Récupère les données d'enrichissement en cache si elles existent et sont récentes (< max_age_days).
+    Récupère les données d'enrichissement en cache si elles existent et sont récentes.
+    - Si contacts présents : cache valide si < 30 jours
+    - Si pas de contacts : cache valide si < 10 jours
     Retourne None si pas de cache ou si les données sont trop anciennes.
     """
     if not HAS_DB:
@@ -528,6 +530,16 @@ def _get_cached_enrichment(website: str, max_age_days: int = 30) -> Optional[Dic
             if not cached:
                 return None
             
+            # Récupérer les contacts
+            emails = cached.emails or []
+            telephones = cached.telephones or []
+            whatsapp = cached.whatsapp or []
+            
+            # Utiliser is_empty pour déterminer l'âge maximum du cache
+            # Si is_empty=True (pas de contacts), cache valide seulement 10 jours
+            # Si is_empty=False (contacts présents), cache valide 30 jours
+            max_age_days = 10 if cached.is_empty else 30
+            
             # Vérifier si les données ont moins de max_age_days
             now = datetime.now(timezone.utc) if cached.updated_at.tzinfo else datetime.now()
             age = now - cached.updated_at
@@ -536,9 +548,9 @@ def _get_cached_enrichment(website: str, max_age_days: int = 30) -> Optional[Dic
             
             # Retourner les données en cache
             return {
-                "emails": cached.emails or [],
-                "telephones": cached.telephones or [],
-                "whatsapp": cached.whatsapp or [],
+                "emails": emails,
+                "telephones": telephones,
+                "whatsapp": whatsapp,
                 "visited_urls": cached.scraped_urls or [],
                 "from_cache": True,
             }
@@ -558,6 +570,7 @@ def _save_enrichment_to_cache(
 ) -> None:
     """
     Enregistre les données d'enrichissement dans le cache.
+    Calcule automatiquement is_empty selon la présence de contacts.
     """
     if not HAS_DB:
         return
@@ -565,6 +578,9 @@ def _save_enrichment_to_cache(
     website = _normalize_url(website)
     if not website:
         return
+    
+    # Calculer is_empty : True si aucun contact trouvé
+    is_empty = not bool(emails or telephones or whatsapp)
     
     try:
         db = SessionLocal()
@@ -580,6 +596,7 @@ def _save_enrichment_to_cache(
                 cached.telephones = telephones
                 cached.whatsapp = whatsapp
                 cached.scraped_urls = scraped_urls
+                cached.is_empty = is_empty
                 cached.updated_at = datetime.now(timezone.utc)
             else:
                 # Créer un nouvel enregistrement
@@ -589,6 +606,7 @@ def _save_enrichment_to_cache(
                     telephones=telephones,
                     whatsapp=whatsapp,
                     scraped_urls=scraped_urls,
+                    is_empty=is_empty,
                 )
                 db.add(cached)
             
@@ -812,7 +830,7 @@ def enrich_prospects(
 
         try:
             # Vérifier le cache d'abord
-            cached_data = _get_cached_enrichment(site, max_age_days=30)
+            cached_data = _get_cached_enrichment(site)
             
             if cached_data:
                 # Utiliser les données du cache
@@ -841,15 +859,14 @@ def enrich_prospects(
 
                 details = extra.get("timing") or {}
 
-                # Sauvegarder dans le cache seulement si on a trouvé des données
-                if extra.get("emails") or extra.get("telephones") or extra.get("whatsapp"):
-                    _save_enrichment_to_cache(
-                        website=site,
-                        emails=extra.get("emails", []),
-                        telephones=extra.get("telephones", []),
-                        whatsapp=extra.get("whatsapp", []),
-                        scraped_urls=extra.get("visited_urls", []),
-                    )
+                # Sauvegarder dans le cache (même si pas de contacts trouvés)
+                _save_enrichment_to_cache(
+                    website=site,
+                    emails=extra.get("emails", []),
+                    telephones=extra.get("telephones", []),
+                    whatsapp=extra.get("whatsapp", []),
+                    scraped_urls=extra.get("visited_urls", []),
+                )
 
             # merge
             p["emails"] = list(dict.fromkeys((p.get("emails") or []) + (extra.get("emails") or [])))
