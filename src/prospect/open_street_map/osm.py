@@ -1,4 +1,5 @@
 import json
+import math
 import time
 import random
 import re
@@ -14,7 +15,7 @@ OVERPASS_ENDPOINTS = [
     "https://overpass.kumi.systems/api/interpreter",
     "https://api.openstreetmap.fr/oapi/interpreter",
     "https://overpass.openstreetmap.ru/api/interpreter",
-    "https://overpass.osm.rambler.ru/cgi/interpreter",
+    "https://overpass.openstreetmap.ru/cgi/interpreter",
 ]
 
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
@@ -114,6 +115,7 @@ def _parse_tags_param(tags: Optional[str]) -> List[Dict[str, Optional[str]]]:
         if low in ALL_KEYS:
             out.append({"key": low, "value": None})
         else:
+            # valeur seule => on tente sur toutes les clés (amenity/shop/...)
             out.append({"key": None, "value": t})
 
     if not out:
@@ -127,7 +129,6 @@ def _geocode(where: str, session: requests.Session) -> Dict[str, Any]:
 
     cached = _bbox_cache_get(key)
     if isinstance(cached, dict) and "bbox" in cached and len(cached["bbox"]) == 4:
-        # marquer le hit sans casser les usages existants
         out = dict(cached)
         out["cache_hit"] = True
         return out
@@ -145,7 +146,7 @@ def _geocode(where: str, session: requests.Session) -> Dict[str, Any]:
         "addressdetails": 1,
     }
 
-    time.sleep(1.0)
+    time.sleep(1.0)  # respecter Nominatim
 
     try:
         r = session.get(NOMINATIM_URL, params=params, headers=headers, timeout=20)
@@ -189,64 +190,68 @@ def _geocode(where: str, session: requests.Session) -> Dict[str, Any]:
 # Overpass request (retry)
 # -------------------------
 def _overpass_request(query: str, session: requests.Session) -> dict:
-    last_err = None
+    """Fait une requête Overpass avec retry sur plusieurs endpoints."""
     errors_by_url = {}
+    max_total_time = 40  # Timeout global de 40s max (strict)
+    start_time = time.time()
 
-    endpoints = OVERPASS_ENDPOINTS.copy()
+    # Limiter à 3 endpoints les plus fiables pour éviter les timeouts
+    endpoints = OVERPASS_ENDPOINTS[:3].copy()
     random.shuffle(endpoints)
 
     for url in endpoints:
-        for attempt in range(3):
+        # Vérifier le timeout global avant chaque endpoint
+        elapsed = time.time() - start_time
+        if elapsed > max_total_time:
+            break
+            
+        # Une seule tentative par endpoint pour aller plus vite
+        try:
+            remaining_time = max_total_time - elapsed
+            request_timeout = min(25, max(5, remaining_time - 2))  # Laisser 2s de marge
+            
+            r = session.post(
+                url,
+                data=query,
+                headers={
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "Accept": "application/json",
+                    "User-Agent": USER_AGENT,
+                },
+                timeout=request_timeout,
+            )
+
+            if r.status_code == 429:
+                errors_by_url[url] = f"Rate limit (429)"
+                continue
+
+            if r.status_code != 200:
+                errors_by_url[url] = f"HTTP {r.status_code}: {r.text[:200]}"
+                continue
+
             try:
-                r = session.post(
-                    url,
-                    data=query,
-                    headers={
-                        "Content-Type": "application/x-www-form-urlencoded",
-                        "Accept": "application/json",
-                        "User-Agent": USER_AGENT,
-                    },
-                    timeout=60,
-                )
+                data = r.json()
+            except json.JSONDecodeError:
+                errors_by_url[url] = f"JSON invalide: {r.text[:200]}"
+                continue
 
-                if r.status_code == 429:
-                    wait_time = (2 ** attempt) * 2 + random.random()
-                    errors_by_url[url] = f"Rate limit (429), attente {wait_time:.1f}s"
-                    time.sleep(wait_time)
-                    continue
+            if "elements" in data:
+                return data
 
-                if r.status_code != 200:
-                    last_err = f"{url} HTTP {r.status_code}: {r.text[:200]}"
-                    errors_by_url[url] = last_err
-                    time.sleep((2 ** attempt) + random.random())
-                    continue
+            errors_by_url[url] = "Réponse invalide: pas de 'elements'"
 
-                try:
-                    data = r.json()
-                    if "elements" in data:
-                        return data
-                    last_err = f"{url} réponse invalide: pas de 'elements'"
-                    errors_by_url[url] = last_err
-                except json.JSONDecodeError:
-                    last_err = f"{url} JSON invalide: {r.text[:200]}"
-                    errors_by_url[url] = last_err
-                    time.sleep((2 ** attempt) + random.random())
-                    continue
+        except requests.exceptions.Timeout:
+            elapsed = time.time() - start_time
+            errors_by_url[url] = f"Timeout après {elapsed:.1f}s"
+        except Exception as e:
+            errors_by_url[url] = str(e)
 
-            except requests.exceptions.Timeout:
-                last_err = f"{url} timeout après 60s"
-                errors_by_url[url] = last_err
-                time.sleep((2 ** attempt) + random.random())
-            except Exception as e:
-                last_err = f"{url}: {e}"
-                errors_by_url[url] = last_err
-                time.sleep((2 ** attempt) + random.random())
-
+    elapsed = time.time() - start_time
     error_summary = "\n".join([f"  - {url}: {err}" for url, err in errors_by_url.items()])
     raise RuntimeError(
-        "Tous les endpoints Overpass sont indisponibles.\n"
+        f"Tous les endpoints Overpass sont indisponibles (temps écoulé: {elapsed:.1f}s).\n"
         f"Erreurs:\n{error_summary}\n"
-        "Réessayer dans quelques minutes."
+        "Réessayer dans quelques minutes ou réduire le rayon de recherche."
     )
 
 
@@ -269,12 +274,19 @@ def _filters_to_overpass_parts(filters: List[Dict[str, Optional[str]]], area_exp
     return parts
 
 
-def _build_query_bbox(filters: List[Dict[str, Optional[str]]], south: float, west: float, north: float, east: float, limit: int) -> str:
+def _build_query_bbox(
+    filters: List[Dict[str, Optional[str]]],
+    south: float,
+    west: float,
+    north: float,
+    east: float,
+    limit: int
+) -> str:
     area_expr = f"({south},{west},{north},{east})"
     parts = _filters_to_overpass_parts(filters, area_expr)
     body = "\n      ".join(parts)
     return f"""
-    [out:json][timeout:60];
+    [out:json][timeout:25];
     (
       {body}
     );
@@ -282,33 +294,77 @@ def _build_query_bbox(filters: List[Dict[str, Optional[str]]], south: float, wes
     """
 
 
-def _build_query_around(filters: List[Dict[str, Optional[str]]], lat: float, lon: float, radius_m: int, limit: int) -> str:
+def _build_query_around(
+    filters: List[Dict[str, Optional[str]]],
+    lat: float,
+    lon: float,
+    radius_m: int,
+    limit: int
+) -> str:
     area_expr = f"(around:{radius_m},{lat},{lon})"
     parts = _filters_to_overpass_parts(filters, area_expr)
     body = "\n      ".join(parts)
     return f"""
-    [out:json][timeout:60];
+    [out:json][timeout:25];
     (
       {body}
     );
     out center {limit};
+    """
+
+
+def _build_query_around_annulus(
+    filters: List[Dict[str, Optional[str]]],
+    lat: float,
+    lon: float,
+    min_radius_m: int,
+    max_radius_m: int,
+    limit: int
+) -> str:
+    """
+    Anneau: max_radius - min_radius
+    Renvoie uniquement ce qui est dans max_radius ET pas dans min_radius.
+    
+    NOTE: Cette requête est très lente sur Overpass. On utilise une approche simplifiée :
+    on récupère tout dans max_radius et on filtre côté client (plus rapide).
+    """
+    # Approche simplifiée : récupérer tout dans max_radius, filtrer côté client
+    area_expr = f"(around:{max_radius_m},{lat},{lon})"
+    parts = _filters_to_overpass_parts(filters, area_expr)
+    body = "\n      ".join(parts)
+    return f"""
+    [out:json][timeout:25];
+    (
+      {body}
+    );
+    out center {limit * 2};
     """
 
 
 def _parse_elements(data: dict, fallback_city: str) -> list[dict]:
     results = []
-    seen_names = set()
+    seen_entities = set()
 
     for el in data.get("elements", []):
+        el_type = el.get("type", "node")
+        el_id = el.get("id")
+
+        # identifiant stable => dédup fiable
+        if el_id is None:
+            continue
+        entity_key = f"osm:{el_type}:{el_id}"
+        if entity_key in seen_entities:
+            continue
+        seen_entities.add(entity_key)
+
         tags = el.get("tags", {})
         name = tags.get("name")
-        if not name or name in seen_names:
+        if not name:
             continue
-        seen_names.add(name)
 
         lat = el.get("lat") or (el.get("center") or {}).get("lat")
         lon = el.get("lon") or (el.get("center") or {}).get("lon")
-        if not lat or not lon:
+        if lat is None or lon is None:
             continue
 
         activity_key = None
@@ -351,11 +407,10 @@ def _parse_elements(data: dict, fallback_city: str) -> list[dict]:
         brand = tags.get("brand")
         cuisine = tags.get("cuisine")
 
-        el_type = el.get("type", "node")
-        el_id = el.get("id")
-        osm_link = f"https://www.openstreetmap.org/{el_type}/{el_id}" if el_id else None
+        osm_link = f"https://www.openstreetmap.org/{el_type}/{el_id}"
 
         results.append({
+            "entity_key": entity_key,   # utile pour DB
             "nom": name,
             "activite_type": activity_key,
             "activite_valeur": activity_value,
@@ -382,45 +437,105 @@ def get_prospects(
     city: Optional[str] = None,
     lat: Optional[float] = None,
     lon: Optional[float] = None,
-    radius_km: Optional[float] = None,
+    radius_km: Optional[float] = None,          # rayon max
+    radius_min_km: Optional[float] = None,      # rayon min (anneau)
     tags: Optional[str] = None,
     number: int = 20,
 ) -> Tuple[List[dict], Dict[str, Any]]:
+    """
+    - Si radius_min_km est fourni et > 0, alors recherche en anneau:
+      (radius_min_km, radius_km]
+    - Sinon comportement standard.
+    """
     number = max(1, min(int(number), 200))
     requested_count = min(number * 2, 500)
 
     s = requests.Session()
     query_text = (where or city or "").strip() or None
-
     filters = _parse_tags_param(tags)
 
-    if lat is not None and lon is not None:
-        used_radius_km = float(radius_km) if radius_km is not None else 5.0
-        used_radius_km = max(0.2, min(used_radius_km, 50.0))
-        radius_m = int(used_radius_km * 1000)
+    def _clamp_radius_km(v: float, minv: float, maxv: float) -> float:
+        return max(minv, min(float(v), maxv))
 
-        q = _build_query_around(filters, float(lat), float(lon), radius_m, requested_count)
+    # -------------------------
+    # Mode lat/lon direct
+    # -------------------------
+    if lat is not None and lon is not None:
+        # Limite réduite à 20km pour éviter les timeouts
+        used_max_km = _clamp_radius_km(radius_km if radius_km is not None else 5.0, 0.2, 20.0)
+        used_min_km = _clamp_radius_km(radius_min_km, 0.0, 19.999) if radius_min_km is not None else 0.0
+
+        if used_min_km >= used_max_km:
+            raise ValueError("radius_min_km doit être strictement < radius_km")
+
+        max_m = int(used_max_km * 1000)
+        min_m = int(used_min_km * 1000)
+
+        if used_min_km > 0:
+            q = _build_query_around_annulus(filters, float(lat), float(lon), min_m, max_m, requested_count)
+            mode = "around_annulus"
+        else:
+            q = _build_query_around(filters, float(lat), float(lon), max_m, requested_count)
+            mode = "around"
+
         data = _overpass_request(q, s)
         results = _parse_elements(data, fallback_city=query_text or "coords")
+        
+        # Filtrer l'anneau côté client si nécessaire (plus rapide que requête Overpass complexe)
+        if used_min_km > 0:
+            center_lat = float(lat)
+            center_lon = float(lon)
+            min_m_sq = min_m * min_m
+            max_m_sq = max_m * max_m
+            
+            filtered_results = []
+            for r in results:
+                r_lat = r.get("lat")
+                r_lon = r.get("lon")
+                if r_lat is None or r_lon is None:
+                    continue
+                
+                # Distance approximative (formule de Haversine simplifiée pour performance)
+                dlat = math.radians(r_lat - center_lat)
+                dlon = math.radians(r_lon - center_lon)
+                a = math.sin(dlat/2)**2 + math.cos(math.radians(center_lat)) * math.cos(math.radians(r_lat)) * math.sin(dlon/2)**2
+                c = 2 * math.asin(math.sqrt(a))
+                distance_m = 6371000 * c  # Rayon Terre en mètres
+                distance_m_sq = distance_m * distance_m
+                
+                # Garder si dans l'anneau (min < distance <= max)
+                if min_m_sq < distance_m_sq <= max_m_sq:
+                    filtered_results.append(r)
+            
+            results = filtered_results
 
         meta = {
-            "mode": "around",
+            "mode": mode,
             "where": query_text,
             "lat": lat,
             "lon": lon,
-            "radius_km": used_radius_km,
+            "radius_km": used_max_km,
+            "radius_min_km": used_min_km,
             "tags": filters,
         }
         return results[:number], meta
 
+    # -------------------------
+    # Mode where/city
+    # -------------------------
     if not query_text:
         raise ValueError("Paramètres requis: where=... OU lat/lon.")
 
     geo = _geocode(query_text, s)
 
+    # Si radius_km fourni => around (ou anneau)
     if radius_km is not None:
-        used_radius_km = max(0.2, min(float(radius_km), 50.0))
-        radius_m = int(used_radius_km * 1000)
+        # Limite réduite à 20km pour éviter les timeouts
+        used_max_km = _clamp_radius_km(radius_km, 0.2, 20.0)
+        used_min_km = _clamp_radius_km(radius_min_km, 0.0, 19.999) if radius_min_km is not None else 0.0
+
+        if used_min_km >= used_max_km:
+            raise ValueError("radius_min_km doit être strictement < radius_km")
 
         g_lat = geo.get("lat")
         g_lon = geo.get("lon")
@@ -429,22 +544,61 @@ def get_prospects(
             g_lat = (south + north) / 2
             g_lon = (west + east) / 2
 
-        q = _build_query_around(filters, float(g_lat), float(g_lon), radius_m, requested_count)
+        max_m = int(used_max_km * 1000)
+        min_m = int(used_min_km * 1000)
+
+        if used_min_km > 0:
+            q = _build_query_around_annulus(filters, float(g_lat), float(g_lon), min_m, max_m, requested_count)
+            mode = "where+radius_annulus"
+        else:
+            q = _build_query_around(filters, float(g_lat), float(g_lon), max_m, requested_count)
+            mode = "where+radius"
+
         data = _overpass_request(q, s)
         results = _parse_elements(data, fallback_city=query_text)
+        
+        # Filtrer l'anneau côté client si nécessaire (plus rapide que requête Overpass complexe)
+        if used_min_km > 0:
+            center_lat = float(g_lat)
+            center_lon = float(g_lon)
+            min_m_sq = min_m * min_m
+            max_m_sq = max_m * max_m
+            
+            filtered_results = []
+            for r in results:
+                r_lat = r.get("lat")
+                r_lon = r.get("lon")
+                if r_lat is None or r_lon is None:
+                    continue
+                
+                # Distance approximative (formule de Haversine simplifiée pour performance)
+                dlat = math.radians(r_lat - center_lat)
+                dlon = math.radians(r_lon - center_lon)
+                a = math.sin(dlat/2)**2 + math.cos(math.radians(center_lat)) * math.cos(math.radians(r_lat)) * math.sin(dlon/2)**2
+                c = 2 * math.asin(math.sqrt(a))
+                distance_m = 6371000 * c  # Rayon Terre en mètres
+                distance_m_sq = distance_m * distance_m
+                
+                # Garder si dans l'anneau (min < distance <= max)
+                if min_m_sq < distance_m_sq <= max_m_sq:
+                    filtered_results.append(r)
+            
+            results = filtered_results
 
         meta = {
-            "mode": "where+radius",
+            "mode": mode,
             "where": query_text,
             "display": geo.get("display"),
             "lat": g_lat,
             "lon": g_lon,
-            "radius_km": used_radius_km,
+            "radius_km": used_max_km,
+            "radius_min_km": used_min_km,
             "tags": filters,
             "geocode_cache_hit": bool(geo.get("cache_hit")),
         }
         return results[:number], meta
 
+    # Sinon bbox
     south, west, north, east = map(float, geo["bbox"])
     q = _build_query_bbox(filters, south, west, north, east, requested_count)
     data = _overpass_request(q, s)

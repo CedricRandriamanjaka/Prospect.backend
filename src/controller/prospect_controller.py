@@ -1,10 +1,8 @@
 """Controller pour gérer les prospects."""
-from typing import Optional, Dict, Any, List, Tuple
-from sqlalchemy.orm import Session
+from typing import Optional, Dict, Any
 from src.prospect.open_street_map import get_prospects
 from src.service.enrich import enrich_prospects
 from src.service.postprocess import postprocess, category_to_tags
-from src.db.crud import get_cache, set_cache, get_or_create_bbox, upsert_prospects
 
 
 class ProspectController:
@@ -12,12 +10,12 @@ class ProspectController:
     
     @staticmethod
     def search_prospects(
-        db: Session,
         where: Optional[str] = None,
         city: Optional[str] = None,
         lat: Optional[float] = None,
         lon: Optional[float] = None,
         radius_km: Optional[float] = None,
+        radius_min_km: Optional[float] = None,   # ✅ AJOUT
         tags: Optional[str] = None,
         category: Optional[str] = None,
         number: int = 20,
@@ -48,13 +46,6 @@ class ProspectController:
         # Astuce: on récupère plus que number pour permettre filtrage/dedupe
         fetch_number = min(max(int(number) * 3, int(number)), 200)
         
-        # Vérifier le cache DB (si city fourni)
-        cache_key_city = (where or city or "").strip()
-        if cache_key_city:
-            cached = get_cache(db, cache_key_city, number)
-            if cached:
-                return cached
-        
         # Récupérer depuis OSM
         try:
             results_raw, meta = get_prospects(
@@ -63,6 +54,7 @@ class ProspectController:
                 lat=lat,
                 lon=lon,
                 radius_km=radius_km,
+                radius_min_km=radius_min_km,  # ✅ AJOUT
                 tags=tags,
                 number=fetch_number,
             )
@@ -124,58 +116,6 @@ class ProspectController:
             seed=seed,
         )
         
-        # Sauvegarder en DB si city_key disponible
-        city_key = None
-        if cache_key_city:
-            bbox_data = meta.get("bbox")
-            if isinstance(bbox_data, list) and len(bbox_data) == 4:
-                try:
-                    city_bbox = get_or_create_bbox(db, cache_key_city, tuple(bbox_data))
-                    city_key = city_bbox.city_key
-                    
-                    # Convertir les résultats pour la DB
-                    db_prospects = []
-                    for r in results_final:
-                        # Extraire osm_type et osm_id depuis osm URL si possible
-                        osm_url = r.get("osm", "")
-                        osm_type = None
-                        osm_id = None
-                        if osm_url:
-                            parts = osm_url.split("/")
-                            if len(parts) >= 2:
-                                osm_type = parts[-2] if parts[-2] in ["node", "way", "relation"] else "node"
-                                try:
-                                    osm_id = int(parts[-1])
-                                except:
-                                    pass
-                        
-                        if osm_type and osm_id:
-                            db_prospects.append({
-                                "osm_type": osm_type,
-                                "osm_id": osm_id,
-                                "name": r.get("nom"),
-                                "activity_type": r.get("activite_type"),
-                                "activity_value": r.get("activite_valeur"),
-                                "website": r.get("site"),
-                                "emails": r.get("emails", []),
-                                "phones": r.get("telephones", []),
-                                "stars": r.get("etoiles"),
-                                "cuisine": r.get("cuisine"),
-                                "opening_hours": r.get("horaires"),
-                                "operator": r.get("operateur"),
-                                "brand": r.get("marque"),
-                                "address": r.get("adresse"),
-                                "lat": r.get("lat"),
-                                "lon": r.get("lon"),
-                                "osm_url": osm_url,
-                                "source": r.get("source", "OpenStreetMap"),
-                            })
-                    
-                    if db_prospects:
-                        upsert_prospects(db, db_prospects, city_key)
-                except Exception:
-                    pass  # Ignorer les erreurs DB pour ne pas casser l'API
-        
         # Construire la réponse
         resp = {
             "query": meta,
@@ -195,12 +135,5 @@ class ProspectController:
         
         if include_coverage:
             resp["coverage"] = coverage
-        
-        # Mettre en cache si city_key disponible
-        if cache_key_city:
-            try:
-                set_cache(db, cache_key_city, number, {"params": meta}, resp)
-            except Exception:
-                pass  # Ignorer les erreurs de cache
         
         return resp

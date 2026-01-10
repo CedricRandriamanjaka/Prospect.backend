@@ -1,4 +1,3 @@
-
 # Prospects API — Quick Guide
 
 ## Endpoints
@@ -15,6 +14,21 @@
 - Mode carte
   - `lat` (float), `lon` (float)
   - `radius_km` (float, optionnel)
+
+### 1bis) Pagination par anneau (optionnel)
+Permet de demander une zone entre 2 rayons (ex: commencer après 2 km).
+- `radius_min_km` (float, optionnel)
+  - Utilisé seulement si `radius_km` est fourni
+  - Doit respecter : `0 <= radius_min_km < radius_km`
+  - Si absent ou `0`, comportement standard (0 → radius_km)
+  - Si > 0, la recherche se fait dans l’anneau : `(radius_min_km, radius_km]`
+
+Exemples:
+- Page 1 : `radius_min_km=0&radius_km=2`
+- Page 2 : `radius_min_km=2&radius_km=4`
+- Page 3 : `radius_min_km=4&radius_km=6`
+
+---
 
 ### 2) Activité
 - `tags` (str)  
@@ -70,6 +84,9 @@
 ### 3) Clic carte + distance
 `/prospects?lat=48.8566&lon=2.3522&radius_km=2&category=hotel&sort=distance&number=30`
 
+### 3bis) Anneau (commencer après 2 km)
+`/prospects?lat=48.8566&lon=2.3522&radius_min_km=2&radius_km=4&category=hotel&sort=distance&number=30`
+
 ### 4) Uniquement contactables
 `/prospects?where=Paris&category=spa&has=email,phone&min_contacts=1&number=50`
 
@@ -81,3 +98,8 @@
 
 ### 7) Random reproductible
 `/prospects?where=Paris&category=restaurant&sort=random&seed=42&number=30`
+
+### 8) Pagination par anneaux (séquence)
+- Page 1 : `/prospects?where=Paris&radius_min_km=0&radius_km=2&category=restaurant&number=20`
+- Page 2 : `/prospects?where=Paris&radius_min_km=2&radius_km=4&category=restaurant&number=20`
+- Page 3 : `/prospects?where=Paris&radius_min_km=4&radius_km=6&category=restaurant&number=20`

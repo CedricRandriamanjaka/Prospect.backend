@@ -15,7 +15,7 @@ except Exception:
 
 
 # -------------------------
-# Regex: Emails
+# Regex: Emails (ANTI faux emails .png/.jpg/.jpeg/.svg/.webp...)
 # -------------------------
 EMAIL_RE = re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
 OBF_EMAIL_RE = re.compile(
@@ -23,6 +23,60 @@ OBF_EMAIL_RE = re.compile(
     re.IGNORECASE,
 )
 MAILTO_RE = re.compile(r"mailto:([^\"\'\?\s>]+)", re.IGNORECASE)
+
+# TLDs à rejeter (faux positifs d'assets: logo@2x.png, icon@3x.jpg, etc.)
+BAD_EMAIL_TLDS = {
+    "png", "jpg", "jpeg", "gif", "svg", "webp", "ico", "bmp", "tif", "tiff",
+    "css", "js", "pdf", "woff", "woff2", "ttf", "eot", "mp4", "mp3", "bet", "se", 
+}
+
+
+def _sanitize_email_candidate(e: str) -> str | None:
+    """
+    Nettoie + valide un email candidat.
+    Rejette les faux positifs type logo@2x.png
+    """
+    if not e:
+        return None
+
+    s = (e or "").strip()
+    if not s:
+        return None
+
+    # enlever query/fragment/path
+    s = s.split("?", 1)[0].split("#", 1)[0].split("/", 1)[0]
+
+    # enlever ponctuation autour
+    s = s.strip().strip(" \t\r\n\"'<>[](){}.,;:")
+
+    # normalisation légère
+    s = s.replace(" ", "")
+    if "@" not in s:
+        return None
+
+    try:
+        local, domain = s.rsplit("@", 1)
+    except ValueError:
+        return None
+
+    if not local or not domain:
+        return None
+
+    if "." not in domain:
+        return None
+
+    # tld
+    tld = domain.rsplit(".", 1)[-1].lower()
+    if tld in BAD_EMAIL_TLDS:
+        return None
+
+    # garde-fous basiques
+    if ".." in s:
+        return None
+    if len(local) > 64 or len(domain) > 255:
+        return None
+
+    return s
 
 
 # -------------------------
@@ -169,6 +223,10 @@ def _strip_scripts_and_styles(html: str) -> str:
 
 
 def _html_to_visible_text(html: str) -> str:
+    """
+    Convertit HTML -> texte visible (sans tags/script/style).
+    Important: réduit les faux emails dans src/href/assets.
+    """
     if not html:
         return ""
     html = _strip_scripts_and_styles(html)
@@ -244,29 +302,41 @@ def _fetch_html(session: requests.Session, url: str, timeout: int = 15) -> tuple
 # Extractors: emails
 # -------------------------
 def _extract_emails(html: str) -> list[str]:
+    """
+    Stratégie anti-faux-positifs:
+    - mailto: dans HTML (fiable)
+    - regex email dans le TEXTE VISIBLE seulement
+    - obfuscation dans TEXTE VISIBLE seulement
+    - filtre TLD images/assets
+    """
     if not html:
         return []
 
-    html = _strip_scripts_and_styles(html)
-    emails = set()
+    html_clean = _strip_scripts_and_styles(html)
 
-    for m in MAILTO_RE.findall(html):
-        e = (m or "").strip()
-        if e:
-            emails.add(e)
+    # 1) mailto: (fiable)
+    emails: list[str] = []
+    for m in MAILTO_RE.findall(html_clean):
+        e = _sanitize_email_candidate(m)
+        if e and e not in emails:
+            emails.append(e)
 
-    for e in EMAIL_RE.findall(html):
-        emails.add(e)
+    # 2) texte visible (évite src/href d'assets)
+    text = _html_to_visible_text(html_clean)
 
-    for user, domain, tld in OBF_EMAIL_RE.findall(html):
-        emails.add(f"{user}@{domain}.{tld}".replace(" ", ""))
+    for e in EMAIL_RE.findall(text):
+        e2 = _sanitize_email_candidate(e)
+        if e2 and e2 not in emails:
+            emails.append(e2)
 
-    out = []
-    for e in emails:
-        e2 = e.strip().strip(".;,")
-        if e2 and e2 not in out:
-            out.append(e2)
-    return out
+    # 3) obfusqués (texte visible)
+    for user, domain, tld in OBF_EMAIL_RE.findall(text):
+        e = f"{user}@{domain}.{tld}".replace(" ", "")
+        e2 = _sanitize_email_candidate(e)
+        if e2 and e2 not in emails:
+            emails.append(e2)
+
+    return emails
 
 
 # -------------------------
@@ -576,9 +646,8 @@ def enrich_prospects(
     delay_seconds: float = 0.7,
     timeout: int = 15,
     return_meta: bool = False,
-    mode: str = "missing",  # <-- NEW: missing|always
+    mode: str = "missing",  # missing|always|never
 ) -> list[dict] | tuple[list[dict], dict]:
-
     """
     Ajouts:
       - dans chaque item:
@@ -586,7 +655,7 @@ def enrich_prospects(
         enrich_seconds (float|None)
         enrich_error (str|None)
         enrich_details (dict)  <-- détails timing + pages
-      - meta:
+      - meta global
     """
     t_total0 = time.perf_counter()
 
@@ -599,6 +668,18 @@ def enrich_prospects(
         p.setdefault("enrich_error", None)
         p.setdefault("enrich_details", None)
 
+    mode = (mode or "missing").lower().strip()
+
+    if mode == "never" or max_enrich <= 0:
+        meta = {
+            "mode": mode,
+            "enriched_count": 0,
+            "total_seconds": 0.0,
+            "avg_seconds": 0.0,
+            "max_enrich": max_enrich,
+        }
+        return (prospects, meta) if return_meta else prospects
+
     for p in prospects:
         if enriched >= max_enrich:
             break
@@ -606,9 +687,6 @@ def enrich_prospects(
         site = p.get("site")
         if not site:
             continue
-
-        # enrichir si manque email/tel
-        mode = (mode or "missing").lower()
 
         # mode=missing => skip si déjà email + phone
         if mode == "missing" and (p.get("emails") or []) and (p.get("telephones") or []):
@@ -663,7 +741,6 @@ def enrich_prospects(
                 "whatsapp": len(after_whatsapp - before_whatsapp),
             },
         }
-
 
         enriched += 1
 

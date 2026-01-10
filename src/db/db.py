@@ -30,8 +30,10 @@ def get_db_url() -> str:
 engine = create_engine(
     get_db_url(),
     pool_pre_ping=True,
-    pool_size=1,
-    max_overflow=0,
+    pool_size=5,
+    max_overflow=10,
+    pool_timeout=30,
+    pool_recycle=3600,
 )
 
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)

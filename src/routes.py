@@ -1,8 +1,6 @@
 """Routes FastAPI pour l'API."""
 from time import perf_counter
-from fastapi import APIRouter, Query, HTTPException, Depends
-from sqlalchemy.orm import Session
-from src.db import db_session
+from fastapi import APIRouter, Query, HTTPException
 from src.controller.prospect_controller import ProspectController
 
 router = APIRouter()
@@ -16,7 +14,6 @@ def health():
 
 @router.get("/prospects")
 def prospects(
-    db: Session = Depends(db_session),
     # Texte libre
     where: str | None = Query(None, min_length=2, description="Ville/quartier/adresse/lieu..."),
     # Backward compatible
@@ -24,8 +21,8 @@ def prospects(
     # Clic carte
     lat: float | None = Query(None, ge=-90),
     lon: float | None = Query(None, ge=-180),
-    # Rayon
-    radius_km: float | None = Query(None, gt=0),
+    # Rayon (limité à 20km pour éviter les timeouts)
+    radius_km: float | None = Query(None, gt=0, le=20, description="Rayon max en km (max 20km)"),
     # Tags / filtres OSM
     tags: str | None = Query(
         None,
@@ -39,13 +36,12 @@ def prospects(
     # Catégorie business simple (optionnel)
     category: str | None = Query(None, description="Ex: restaurant, hotel, spa, bakery, pharmacy..."),
     # Nombre final renvoyé
-    number: int = Query(20, ge=1, le=200),
+    number: int = Query(20, ge=1),
     # Enrichissement
-    enrich_max: int = Query(10, ge=0, le=200),
-    enrich_mode: str = Query("missing", description="missing|always|never"),
+    enrich_max: int = Query(0, ge=0),
     # Filtres prospection
     has: str | None = Query(None, description="Ex: website,email,phone,whatsapp"),
-    min_contacts: int = Query(0, ge=0, le=4),
+    min_contacts: int = Query(0, ge=0),
     exclude_names: str | None = Query(None, description="Mots à exclure dans nom. Ex: mairie, police"),
     exclude_brands: str | None = Query(None, description="Exclure marque/opérateur. Ex: kfc, carrefour"),
     # Tri / dédup
@@ -68,7 +64,6 @@ def prospects(
 
     try:
         result = ProspectController.search_prospects(
-            db=db,
             where=where,
             city=city,
             lat=lat,
@@ -78,7 +73,6 @@ def prospects(
             category=category,
             number=number,
             enrich_max=enrich_max,
-            enrich_mode=enrich_mode,
             has=has,
             min_contacts=min_contacts,
             exclude_names=exclude_names,
