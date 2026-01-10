@@ -21,8 +21,9 @@ def prospects(
     # Clic carte
     lat: float | None = Query(None, ge=-90),
     lon: float | None = Query(None, ge=-180),
-    # Rayon (limité à 20km pour éviter les timeouts)
-    radius_km: float | None = Query(None, gt=0, le=20, description="Rayon max en km (max 20km)"),
+    # Rayon
+    radius_km: float | None = Query(None, gt=0, description="Rayon max en km"),
+    radius_min_km: float | None = Query(None, ge=0, description="Rayon min en km (anneau)"),
     # Tags / filtres OSM
     tags: str | None = Query(
         None,
@@ -69,6 +70,7 @@ def prospects(
             lat=lat,
             lon=lon,
             radius_km=radius_km,
+            radius_min_km=radius_min_km,  # ✅ AJOUT IMPORTANT
             tags=tags,
             category=category,
             number=number,
@@ -83,10 +85,10 @@ def prospects(
             seed=seed,
             include_coverage=include_coverage,
         )
-        
+
         total_seconds = perf_counter() - t_total0
         result["timings"]["total_seconds"] = round(total_seconds, 3)
-        
+
         return result
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
