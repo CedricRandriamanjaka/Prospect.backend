@@ -1,48 +1,37 @@
-"""Configuration de l'environnement Alembic pour les migrations."""
-import os
+"""
+Configuration Alembic simplifiée pour les migrations.
+"""
+from logging.config import fileConfig
+from sqlalchemy import pool
+from alembic import context
+
+# Import de la base de données centralisée
 import sys
 from pathlib import Path
-from logging.config import fileConfig
-from sqlalchemy import engine_from_config, pool
-from alembic import context
-from dotenv import load_dotenv
 
-# Ajouter le répertoire src au path pour les imports
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
+# Ajouter le répertoire parent au path pour les imports
+project_root = Path(__file__).parent.parent.parent.parent
+sys.path.insert(0, str(project_root))
 
-# Charger le fichier .env depuis la racine du projet
-env_path = Path(__file__).parent.parent.parent.parent / ".env"
-if env_path.exists():
-    load_dotenv(env_path)
+# Imports depuis src/
+from src.database import Base, engine
+# Importe tous les modèles pour qu'Alembic les détecte
+from src.models import *
 
-from src.model.models import Base
+# Configuration Alembic
+config = context.config
 
-# config sera initialisé par Alembic
-config = context.config if hasattr(context, 'config') else None
-if config:
+# Configurer le logging si un fichier de config existe
+if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
+# Métadonnées pour Alembic (tous les modèles)
 target_metadata = Base.metadata
 
 
-def get_url():
-    """Récupère et convertit l'URL de la base de données pour psycopg3."""
-    url = os.environ.get("DATABASE_URL")
-    if not url:
-        raise ValueError(
-            "DATABASE_URL n'est pas défini. "
-            "Créez un fichier .env dans Prospect.backend/ avec :\n"
-            "DATABASE_URL=postgresql://user:password@host:port/database?sslmode=require"
-        )
-    url = url.strip()
-    if url.startswith("postgresql://"):
-        url = url.replace("postgresql://", "postgresql+psycopg://", 1)
-    return url
-
-
 def run_migrations_offline() -> None:
-    """Run migrations in 'offline' mode."""
-    url = get_url()
+    """Exécute les migrations en mode offline."""
+    url = config.get_main_option("sqlalchemy.url")
     context.configure(
         url=url,
         target_metadata=target_metadata,
@@ -55,22 +44,17 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
-    """Run migrations in 'online' mode."""
-    configuration = config.get_section(config.config_ini_section)
-    configuration["sqlalchemy.url"] = get_url()
-
-    connectable = engine_from_config(
-        configuration,
-        prefix="sqlalchemy.",
-        poolclass=pool.NullPool,
-    )
+    """Exécute les migrations en mode online."""
+    # Utiliser l'engine directement depuis database.py
+    connectable = engine
 
     with connectable.connect() as connection:
         context.configure(
             connection=connection,
             target_metadata=target_metadata,
-            compare_type=True
+            compare_type=True,
         )
+
         with context.begin_transaction():
             context.run_migrations()
 

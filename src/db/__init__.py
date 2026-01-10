@@ -1,5 +1,13 @@
-"""Gestion de la base de données (configuration uniquement, non utilisée pour l'instant)."""
-from .db import engine, SessionLocal, db_session, get_db_url
+"""
+Ce module est déprécié. Utilisez database.py et models.py à la racine de src/.
+Conservé pour compatibilité ascendante.
+"""
+from ..database import (
+    engine,
+    SessionLocal,
+    get_db as db_session,
+    get_database_url as get_db_url,
+)
 
 __all__ = [
     "engine",
