@@ -91,7 +91,7 @@ Exemples:
 `/prospects?where=Paris&category=spa&has=email,phone&min_contacts=1&number=50`
 
 ### 5) Enrichissement (recommandé)
-`/prospects?where=Paris&category=hotel&enrich_mode=missing&enrich_max=10&number=30`
+`/prospects?where=Paris&category=hotel&enrich_max=10&number=30`
 
 ### 6) Vue légère export
 `/prospects?where=Paris&category=bakery&view=light&number=100`
