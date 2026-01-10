@@ -1,8 +1,18 @@
 import re
 import time
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urljoin, urlparse
+from typing import Optional, Dict, Any
 
 import requests
+
+# Import du modèle et de la session DB
+try:
+    from ..database import SessionLocal
+    from ..models import OpenStreetMapEnrichi
+    HAS_DB = True
+except ImportError:
+    HAS_DB = False
 
 # --- Optionnel: validation très fiable des numéros au format international (+...)
 # pip install phonenumbers
@@ -494,6 +504,105 @@ def _find_contact_urls(base_url: str, html: str, limit: int = 3) -> list[str]:
 
 
 # -------------------------
+# Cache: fonctions de lecture/écriture
+# -------------------------
+def _get_cached_enrichment(website: str, max_age_days: int = 30) -> Optional[Dict[str, Any]]:
+    """
+    Récupère les données d'enrichissement en cache si elles existent et sont récentes (< max_age_days).
+    Retourne None si pas de cache ou si les données sont trop anciennes.
+    """
+    if not HAS_DB:
+        return None
+    
+    website = _normalize_url(website)
+    if not website:
+        return None
+    
+    try:
+        db = SessionLocal()
+        try:
+            cached = db.query(OpenStreetMapEnrichi).filter(
+                OpenStreetMapEnrichi.website == website
+            ).first()
+            
+            if not cached:
+                return None
+            
+            # Vérifier si les données ont moins de max_age_days
+            now = datetime.now(timezone.utc) if cached.updated_at.tzinfo else datetime.now()
+            age = now - cached.updated_at
+            if age.days >= max_age_days:
+                return None
+            
+            # Retourner les données en cache
+            return {
+                "emails": cached.emails or [],
+                "telephones": cached.telephones or [],
+                "whatsapp": cached.whatsapp or [],
+                "visited_urls": cached.scraped_urls or [],
+                "from_cache": True,
+            }
+        finally:
+            db.close()
+    except Exception:
+        # En cas d'erreur DB, on continue sans cache
+        return None
+
+
+def _save_enrichment_to_cache(
+    website: str,
+    emails: list[str],
+    telephones: list[str],
+    whatsapp: list[str],
+    scraped_urls: list[str],
+) -> None:
+    """
+    Enregistre les données d'enrichissement dans le cache.
+    """
+    if not HAS_DB:
+        return
+    
+    website = _normalize_url(website)
+    if not website:
+        return
+    
+    try:
+        db = SessionLocal()
+        try:
+            # Chercher un enregistrement existant
+            cached = db.query(OpenStreetMapEnrichi).filter(
+                OpenStreetMapEnrichi.website == website
+            ).first()
+            
+            if cached:
+                # Mettre à jour
+                cached.emails = emails
+                cached.telephones = telephones
+                cached.whatsapp = whatsapp
+                cached.scraped_urls = scraped_urls
+                cached.updated_at = datetime.now(timezone.utc)
+            else:
+                # Créer un nouvel enregistrement
+                cached = OpenStreetMapEnrichi(
+                    website=website,
+                    emails=emails,
+                    telephones=telephones,
+                    whatsapp=whatsapp,
+                    scraped_urls=scraped_urls,
+                )
+                db.add(cached)
+            
+            db.commit()
+        except Exception:
+            db.rollback()
+        finally:
+            db.close()
+    except Exception:
+        # En cas d'erreur DB, on continue sans sauvegarder
+        pass
+
+
+# -------------------------
 # Public API: enrichissement d'un site + détails timing
 # -------------------------
 def enrich_contacts_from_website(
@@ -702,15 +811,45 @@ def enrich_prospects(
         details = None
 
         try:
-            extra = enrich_contacts_from_website(
-                site,
-                session=s,
-                max_pages=3,
-                timeout=timeout,
-                delay_seconds=delay_seconds,
-            )
+            # Vérifier le cache d'abord
+            cached_data = _get_cached_enrichment(site, max_age_days=30)
+            
+            if cached_data:
+                # Utiliser les données du cache
+                extra = {
+                    "emails": cached_data.get("emails", []),
+                    "telephones": cached_data.get("telephones", []),
+                    "whatsapp": cached_data.get("whatsapp", []),
+                    "visited_urls": cached_data.get("visited_urls", []),
+                    "timing": {
+                        "total_seconds": 0.0,
+                        "sleep_seconds": 0.0,
+                        "find_contact_urls_seconds": 0.0,
+                        "pages": [],
+                    },
+                }
+                details = extra.get("timing") or {}
+            else:
+                # Scraper le site
+                extra = enrich_contacts_from_website(
+                    site,
+                    session=s,
+                    max_pages=3,
+                    timeout=timeout,
+                    delay_seconds=delay_seconds,
+                )
 
-            details = extra.get("timing") or {}
+                details = extra.get("timing") or {}
+
+                # Sauvegarder dans le cache seulement si on a trouvé des données
+                if extra.get("emails") or extra.get("telephones") or extra.get("whatsapp"):
+                    _save_enrichment_to_cache(
+                        website=site,
+                        emails=extra.get("emails", []),
+                        telephones=extra.get("telephones", []),
+                        whatsapp=extra.get("whatsapp", []),
+                        scraped_urls=extra.get("visited_urls", []),
+                    )
 
             # merge
             p["emails"] = list(dict.fromkeys((p.get("emails") or []) + (extra.get("emails") or [])))
