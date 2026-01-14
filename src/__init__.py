@@ -1,27 +1,24 @@
 """
 Package principal de l'application.
+Expose uniquement les helpers DB psycopg.
 """
-from .db.database import (
-    Base,
-    engine,
-    SessionLocal,
-    get_db,
-    get_database_url,
-    test_connection,
-)
 
-from .model.models import (
-    TestTable,
+from .db import (
+    Json,
+    pool,
+    get_database_url,
+    get_conn,
+    fetch_one,
+    fetch_all,
+    execute,
 )
 
 __all__ = [
-    # Database
-    "Base",
-    "engine",
-    "SessionLocal",
-    "get_db",
+    "Json",
+    "pool",
     "get_database_url",
-    "test_connection",
-    # Models
-    "TestTable",
+    "get_conn",
+    "fetch_one",
+    "fetch_all",
+    "execute",
 ]
