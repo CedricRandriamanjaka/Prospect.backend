@@ -6,13 +6,11 @@ datasource db {
   provider = "postgresql"
 }
 
-/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 model abonnements {
   id                     String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   user_id                String        @db.Uuid
   pricing_plan_id        String        @db.Uuid
 
-// NEW: traçage du code promo utilisé
   code_promo_id          String?       @db.Uuid
   promo_free_months      Int? 
 
@@ -30,7 +28,6 @@ model abonnements {
   pricing_plans          pricing_plans @relation(fields: [pricing_plan_id], references: [id], onUpdate: NoAction)
   users                  users         @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
-  // NEW relation
   code_promo             code_promo?   @relation(fields: [code_promo_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
   @@index([user_id, is_active], map: "idx_abonnements_user_active")
@@ -127,6 +124,8 @@ model pricing_plans {
   created_at             DateTime      @default(now()) @db.Timestamptz(6)
   updated_at             DateTime      @default(now()) @db.Timestamptz(6)
   abonnements            abonnements[]
+
+  codes_promo            code_promo[]
 
   @@index([billing_period], map: "idx_pricing_plans_billing_period")
   @@index([is_active], map: "idx_pricing_plans_is_active")
@@ -247,35 +246,19 @@ model users {
 
 model code_promo {
   id               String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-
-  // Code saisi par l'utilisateur
   code             String        @unique(map: "ux_code_promo_code") @db.VarChar(64)
-
-  // Description interne / marketing
   description      String?       @db.VarChar(255)
-
-  // Optionnel : code limité à un plan
   pricing_plan_id  String?       @db.Uuid
-
-  // Remise fixe (pas en %)
   discount_amount  Decimal?      @db.Decimal(10, 2)
-
-  // Nombre de mois offerts (ajoutés à l'abonnement à l'activation)
   free_months      Int           @default(0)
-
-  // Limites d'utilisation
   max_redemptions  Int?
   redeemed_count   Int           @default(0)
-
-  // Validité
   starts_at        DateTime?     @db.Timestamptz(6)
   expires_at       DateTime?     @db.Timestamptz(6)
   is_active        Boolean       @default(true)
-
   created_at       DateTime      @default(now()) @db.Timestamptz(6)
   updated_at       DateTime      @default(now()) @db.Timestamptz(6)
 
-  // Relations
   pricing_plans    pricing_plans? @relation(fields: [pricing_plan_id], references: [id], onUpdate: NoAction)
   abonnements      abonnements[]
 
