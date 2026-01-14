@@ -48,14 +48,29 @@ Exemples:
   - `always` : enrichit même si déjà des contacts
   - `never` : désactive
 
+**Optimisation** : L'enrichissement est maintenant pré-sélectionné. Avant d'enrichir, le système :
+1. Applique les filtres (`has`, `min_contacts`, `exclude_names`, `exclude_brands`)
+2. Trie les résultats selon `sort`
+3. Déduplique selon `dedupe`
+4. Enrichit en priorité les meilleurs candidats (ceux qui survivront probablement aux filtres finaux)
+
+Cela permet d'enrichir les prospects les plus pertinents en premier, réduisant le temps d'enrichissement et améliorant la qualité des résultats.
+
 ### 5) Filtres prospection
 - `has` (csv) → `website,email,phone,whatsapp`
+  - **Optimisation** : Si `has` est fourni, le filtre est appliqué directement dans la requête Overpass (pushdown), ce qui réduit le nombre de résultats récupérés et améliore les performances.
+  - Ex: `has=website` → récupère uniquement les POI ayant un site web dans OSM
 - `min_contacts` (int, défaut 0, 0..4)
 - `exclude_names` (csv) → exclure mots dans `nom`
 - `exclude_brands` (csv) → exclure marque/opérateur
 
 ### 6) Tri / dédup / vue
 - `sort` (défaut `contacts`) : `contacts|distance|name|random`
+  - **`contacts`** : Tri par nombre de méthodes de contact (site web, email, téléphone, WhatsApp)
+    - **Optimisation** : Les prospects avec un site web sont prioritaires comme tie-break (à nombre de contacts égal, ceux avec site remontent)
+  - **`distance`** : Tri par distance (nécessite `lat`/`lon` ou `radius_km`)
+  - **`name`** : Tri alphabétique par nom
+  - **`random`** : Tri aléatoire (reproductible avec `seed`)
 - `dedupe` (défaut `smart`) : `none|strict|smart`
 - `seed` (int) : pour `sort=random`
 - `view` (défaut `full`) : `full|light`
@@ -90,8 +105,14 @@ Exemples:
 ### 4) Uniquement contactables
 `/prospects?where=Paris&category=spa&has=email,phone&min_contacts=1&number=50`
 
+### 4bis) Pushdown has= (optimisé)
+`/prospects?where=Maurice&category=hotel&has=website&min_contacts=1&number=30&enrich_max=5`
+- Le filtre `has=website` est appliqué directement dans Overpass, réduisant le nombre de résultats récupérés
+- L'enrichissement est plus rapide car on enrichit uniquement les prospects déjà contactables
+
 ### 5) Enrichissement (recommandé)
 `/prospects?where=Paris&category=hotel&enrich_max=10&number=30`
+- Les meilleurs candidats sont enrichis en priorité grâce à la pré-sélection
 
 ### 6) Vue légère export
 `/prospects?where=Paris&category=bakery&view=light&number=100`

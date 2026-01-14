@@ -234,6 +234,7 @@ def sort_results(results: list[dict], sort: str, seed: int | None = None) -> lis
         results,
         key=lambda r: (
             -(r.get("sales") or {}).get("contact_methods_count", 0),
+            -int(bool((r.get("site") or "").strip())),  # ✅ tie-break business
             -(r.get("sales") or {}).get("emails_count", 0),
             -(r.get("sales") or {}).get("phones_count", 0),
             _norm_text(r.get("nom")),

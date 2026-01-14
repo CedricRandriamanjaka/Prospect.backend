@@ -255,21 +255,85 @@ def _overpass_request(query: str, session: requests.Session) -> dict:
     )
 
 
-def _filters_to_overpass_parts(filters: List[Dict[str, Optional[str]]], area_expr: str) -> List[str]:
+def _contact_tag_variants(osm_has: Optional[list[str]]) -> list[list[str]]:
+    """
+    Retourne une liste de combinaisons de tags à exiger (AND),
+    en gérant les variantes (OR) via produit cartésien.
+    Ex:
+      has=website,email => [
+        ["website","email"], ["website","contact:email"], ["contact:website","email"], ...
+      ]
+    """
+    if not osm_has:
+        return []
+
+    hs = set([h.strip().lower() for h in osm_has if h and h.strip()])
+    if not hs:
+        return []
+
+    mapping: dict[str, list[str]] = {
+        "website": ["website", "contact:website", "url", "contact:url"],
+        "email": ["email", "contact:email"],
+        "phone": ["phone", "contact:phone", "mobile", "contact:mobile"],
+        "whatsapp": ["whatsapp", "contact:whatsapp"],
+    }
+
+    groups: list[list[str]] = []
+    for k, variants in mapping.items():
+        if k in hs:
+            groups.append(variants)
+
+    if not groups:
+        return []
+
+    # produit cartésien (cap de sécurité)
+    combos: list[list[str]] = [[]]
+    for g in groups:
+        new: list[list[str]] = []
+        for c in combos:
+            for v in g:
+                new.append(c + [v])
+                if len(new) > 60:  # cap anti explosion
+                    break
+            if len(new) > 60:
+                break
+        combos = new
+        if len(combos) > 60:
+            combos = combos[:60]
+            break
+
+    return combos
+
+
+def _filters_to_overpass_parts(
+    filters: List[Dict[str, Optional[str]]],
+    area_expr: str,
+    osm_has: Optional[list[str]] = None,
+) -> List[str]:
     parts: List[str] = []
+    combos = _contact_tag_variants(osm_has)
+
     for f in filters:
         k = f.get("key")
         v = f.get("value")
 
+        def emit(base: str):
+            if combos:
+                for combo in combos:
+                    extra = "".join([f'["{t}"]' for t in combo])
+                    parts.append(f'{base}{extra}["name"]{area_expr};')
+            else:
+                parts.append(f'{base}["name"]{area_expr};')
+
         if k and v:
-            parts.append(f'nwr["{k}"="{v}"]["name"]{area_expr};')
+            emit(f'nwr["{k}"="{v}"]')
         elif k and not v:
-            parts.append(f'nwr["{k}"]["name"]{area_expr};')
+            emit(f'nwr["{k}"]')
         else:
             if not v:
                 continue
             for kk in ALL_KEYS:
-                parts.append(f'nwr["{kk}"="{v}"]["name"]{area_expr};')
+                emit(f'nwr["{kk}"="{v}"]')
 
     return parts
 
@@ -280,10 +344,11 @@ def _build_query_bbox(
     west: float,
     north: float,
     east: float,
-    limit: int
+    limit: int,
+    osm_has: Optional[list[str]] = None,
 ) -> str:
     area_expr = f"({south},{west},{north},{east})"
-    parts = _filters_to_overpass_parts(filters, area_expr)
+    parts = _filters_to_overpass_parts(filters, area_expr, osm_has=osm_has)
     body = "\n      ".join(parts)
     return f"""
     [out:json][timeout:25];
@@ -299,10 +364,11 @@ def _build_query_around(
     lat: float,
     lon: float,
     radius_m: int,
-    limit: int
+    limit: int,
+    osm_has: Optional[list[str]] = None,
 ) -> str:
     area_expr = f"(around:{radius_m},{lat},{lon})"
-    parts = _filters_to_overpass_parts(filters, area_expr)
+    parts = _filters_to_overpass_parts(filters, area_expr, osm_has=osm_has)
     body = "\n      ".join(parts)
     return f"""
     [out:json][timeout:25];
@@ -319,7 +385,8 @@ def _build_query_around_annulus(
     lon: float,
     min_radius_m: int,
     max_radius_m: int,
-    limit: int
+    limit: int,
+    osm_has: Optional[list[str]] = None,
 ) -> str:
     """
     Anneau: max_radius - min_radius
@@ -330,7 +397,7 @@ def _build_query_around_annulus(
     """
     # Approche simplifiée : récupérer tout dans max_radius, filtrer côté client
     area_expr = f"(around:{max_radius_m},{lat},{lon})"
-    parts = _filters_to_overpass_parts(filters, area_expr)
+    parts = _filters_to_overpass_parts(filters, area_expr, osm_has=osm_has)
     body = "\n      ".join(parts)
     return f"""
     [out:json][timeout:25];
@@ -441,6 +508,7 @@ def get_prospects(
     radius_min_km: Optional[float] = None,      # rayon min (anneau)
     tags: Optional[str] = None,
     number: int = 20,
+    osm_has: Optional[list[str]] = None,
 ) -> Tuple[List[dict], Dict[str, Any]]:
     """
     - Si radius_min_km est fourni et > 0, alors recherche en anneau:
@@ -472,10 +540,10 @@ def get_prospects(
         min_m = int(used_min_km * 1000)
 
         if used_min_km > 0:
-            q = _build_query_around_annulus(filters, float(lat), float(lon), min_m, max_m, requested_count)
+            q = _build_query_around_annulus(filters, float(lat), float(lon), min_m, max_m, requested_count, osm_has=osm_has)
             mode = "around_annulus"
         else:
-            q = _build_query_around(filters, float(lat), float(lon), max_m, requested_count)
+            q = _build_query_around(filters, float(lat), float(lon), max_m, requested_count, osm_has=osm_has)
             mode = "around"
 
         data = _overpass_request(q, s)
@@ -548,10 +616,10 @@ def get_prospects(
         min_m = int(used_min_km * 1000)
 
         if used_min_km > 0:
-            q = _build_query_around_annulus(filters, float(g_lat), float(g_lon), min_m, max_m, requested_count)
+            q = _build_query_around_annulus(filters, float(g_lat), float(g_lon), min_m, max_m, requested_count, osm_has=osm_has)
             mode = "where+radius_annulus"
         else:
-            q = _build_query_around(filters, float(g_lat), float(g_lon), max_m, requested_count)
+            q = _build_query_around(filters, float(g_lat), float(g_lon), max_m, requested_count, osm_has=osm_has)
             mode = "where+radius"
 
         data = _overpass_request(q, s)
@@ -600,7 +668,7 @@ def get_prospects(
 
     # Sinon bbox
     south, west, north, east = map(float, geo["bbox"])
-    q = _build_query_bbox(filters, south, west, north, east, requested_count)
+    q = _build_query_bbox(filters, south, west, north, east, requested_count, osm_has=osm_has)
     data = _overpass_request(q, s)
     results = _parse_elements(data, fallback_city=query_text)
 
