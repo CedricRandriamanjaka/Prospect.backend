@@ -7,12 +7,12 @@ datasource db {
 }
 
 model abonnements {
-  id                     String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  user_id                String        @db.Uuid
-  pricing_plan_id        String        @db.Uuid
+  id              String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id         String @db.Uuid
+  pricing_plan_id String @db.Uuid
 
-  code_promo_id          String?       @db.Uuid
-  promo_free_months      Int? 
+  code_promo_id     String? @db.Uuid
+  promo_free_months Int?
 
   start_date             DateTime      @db.Timestamptz(6)
   end_date               DateTime      @db.Timestamptz(6)
@@ -28,13 +28,14 @@ model abonnements {
   pricing_plans          pricing_plans @relation(fields: [pricing_plan_id], references: [id], onUpdate: NoAction)
   users                  users         @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
-  code_promo             code_promo?   @relation(fields: [code_promo_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  code_promo code_promo? @relation(fields: [code_promo_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
   @@index([user_id, is_active], map: "idx_abonnements_user_active")
   @@index([end_date], map: "ix_abonnements_end_date")
   @@index([is_active], map: "ix_abonnements_is_active")
   @@index([pricing_plan_id], map: "ix_abonnements_pricing_plan_id")
   @@index([user_id], map: "ix_abonnements_user_id")
+  @@index([code_promo_id], map: "ix_abonnements_code_promo_id")
 }
 
 model api_keys {
@@ -125,7 +126,7 @@ model pricing_plans {
   updated_at             DateTime      @default(now()) @db.Timestamptz(6)
   abonnements            abonnements[]
 
-  codes_promo            code_promo[]
+  codes_promo code_promo[]
 
   @@index([billing_period], map: "idx_pricing_plans_billing_period")
   @@index([is_active], map: "idx_pricing_plans_is_active")
@@ -245,22 +246,22 @@ model users {
 }
 
 model code_promo {
-  id               String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  code             String        @unique(map: "ux_code_promo_code") @db.VarChar(64)
-  description      String?       @db.VarChar(255)
-  pricing_plan_id  String?       @db.Uuid
-  discount_amount  Decimal?      @db.Decimal(10, 2)
-  free_months      Int           @default(0)
-  max_redemptions  Int?
-  redeemed_count   Int           @default(0)
-  starts_at        DateTime?     @db.Timestamptz(6)
-  expires_at       DateTime?     @db.Timestamptz(6)
-  is_active        Boolean       @default(true)
-  created_at       DateTime      @default(now()) @db.Timestamptz(6)
-  updated_at       DateTime      @default(now()) @db.Timestamptz(6)
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code            String    @unique(map: "ux_code_promo_code") @db.VarChar(64)
+  description     String?   @db.VarChar(255)
+  pricing_plan_id String?   @db.Uuid
+  discount_amount Decimal?  @db.Decimal(10, 2)
+  free_months     Int       @default(0)
+  max_redemptions Int?
+  redeemed_count  Int       @default(0)
+  starts_at       DateTime? @db.Timestamptz(6)
+  expires_at      DateTime? @db.Timestamptz(6)
+  is_active       Boolean   @default(true)
+  created_at      DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime  @default(now()) @db.Timestamptz(6)
 
-  pricing_plans    pricing_plans? @relation(fields: [pricing_plan_id], references: [id], onUpdate: NoAction)
-  abonnements      abonnements[]
+  pricing_plan pricing_plans? @relation(fields: [pricing_plan_id], references: [id], onUpdate: NoAction)
+  abonnements  abonnements[]
 
   @@index([pricing_plan_id], map: "ix_code_promo_pricing_plan_id")
   @@index([is_active, expires_at], map: "ix_code_promo_active_expires")
