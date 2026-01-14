@@ -1,0 +1,242 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model abonnements {
+  id                     String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id                String        @db.Uuid
+  pricing_plan_id        String        @db.Uuid
+  start_date             DateTime      @db.Timestamptz(6)
+  end_date               DateTime      @db.Timestamptz(6)
+  auto_renew             Boolean       @default(false)
+  cancelled_at           DateTime?     @db.Timestamptz(6)
+  cancellation_reason    String?       @db.VarChar
+  payment_status         String        @default("pending") @db.VarChar
+  stripe_subscription_id String?       @db.VarChar
+  stripe_customer_id     String?       @db.VarChar
+  is_active              Boolean       @default(true)
+  created_at             DateTime      @default(now()) @db.Timestamptz(6)
+  updated_at             DateTime      @default(now()) @db.Timestamptz(6)
+  pricing_plans          pricing_plans @relation(fields: [pricing_plan_id], references: [id], onUpdate: NoAction)
+  users                  users         @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([user_id, is_active], map: "idx_abonnements_user_active")
+  @@index([end_date], map: "ix_abonnements_end_date")
+  @@index([is_active], map: "ix_abonnements_is_active")
+  @@index([pricing_plan_id], map: "ix_abonnements_pricing_plan_id")
+  @@index([user_id], map: "ix_abonnements_user_id")
+}
+
+model alembic_version {
+  version_num String @id(map: "alembic_version_pkc") @db.VarChar(32)
+}
+
+model api_keys {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id      String    @db.Uuid
+  key_hash     String    @unique(map: "ix_api_keys_key_hash") @db.VarChar
+  name         String    @db.VarChar
+  last_used_at DateTime? @db.Timestamptz(6)
+  expires_at   DateTime? @db.Timestamptz(6)
+  is_active    Boolean   @default(true)
+  created_at   DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime  @default(now()) @db.Timestamptz(6)
+  users        users     @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([expires_at], map: "ix_api_keys_expires_at")
+  @@index([is_active], map: "ix_api_keys_is_active")
+  @@index([user_id], map: "ix_api_keys_user_id")
+}
+
+model black_list {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email      String    @unique(map: "ix_black_list_email") @db.VarChar
+  user_id    String?   @db.Uuid
+  reason     String?   @db.VarChar
+  date_end   DateTime? @db.Timestamptz(6)
+  is_active  Boolean   @default(true)
+  created_at DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at DateTime  @default(now()) @db.Timestamptz(6)
+  users      users?    @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([date_end], map: "ix_black_list_date_end")
+  @@index([is_active], map: "ix_black_list_is_active")
+  @@index([user_id], map: "ix_black_list_user_id")
+}
+
+model companies {
+  id         String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name       String     @db.VarChar
+  siret      String?    @unique(map: "ix_companies_siret") @db.VarChar
+  address    String?    @db.VarChar
+  city       String?    @db.VarChar
+  country    String?    @db.VarChar
+  website    String?    @db.VarChar
+  phone      String?    @db.VarChar
+  email      String?    @db.VarChar
+  created_at DateTime   @default(now()) @db.Timestamptz(6)
+  updated_at DateTime   @default(now()) @db.Timestamptz(6)
+  profiles   profiles[]
+
+  @@index([city], map: "ix_companies_city")
+  @@index([name], map: "ix_companies_name")
+}
+
+model openstreetmap_enrichi {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  website      String   @unique(map: "ix_openstreetmap_enrichi_website") @db.VarChar
+  emails       Json?
+  telephones   Json?
+  whatsapp     Json?
+  scraped_urls Json?
+  is_empty     Boolean  @default(false)
+  created_at   DateTime @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([updated_at], map: "idx_openstreetmap_enrichi_updated_at")
+  @@index([website], map: "idx_openstreetmap_enrichi_website")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model pricing_plans {
+  id                     String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name                   String        @db.VarChar
+  description            String?
+  price                  Decimal       @db.Decimal(10, 2)
+  currency               String        @default("EUR") @db.VarChar
+  price_promo            Decimal?      @db.Decimal(10, 2)
+  price_promo_start_date DateTime?     @db.Timestamptz(6)
+  price_promo_end_date   DateTime?     @db.Timestamptz(6)
+  billing_period         String        @db.VarChar
+  max_prospects          Int?
+  max_prospects_per_hour Int?
+  max_prospects_per_day  Int?
+  count_limit            Int?
+  geoloc_limit           Int?
+  is_active              Boolean       @default(true)
+  is_display             Boolean       @default(true)
+  created_at             DateTime      @default(now()) @db.Timestamptz(6)
+  updated_at             DateTime      @default(now()) @db.Timestamptz(6)
+  abonnements            abonnements[]
+
+  @@index([billing_period], map: "idx_pricing_plans_billing_period")
+  @@index([is_active], map: "idx_pricing_plans_is_active")
+  @@index([billing_period], map: "ix_pricing_plans_billing_period")
+  @@index([is_active], map: "ix_pricing_plans_is_active")
+}
+
+model profiles {
+  id         String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id    String     @unique(map: "ix_profiles_user_id") @db.Uuid
+  name       String?    @db.VarChar
+  firstname  String?    @db.VarChar
+  city       String?    @db.VarChar
+  country    String?    @db.VarChar
+  phone      String?    @db.VarChar
+  email      String?    @db.VarChar
+  website    String?    @db.VarChar
+  company_id String?    @db.Uuid
+  avatar_url String?    @db.VarChar
+  language   String     @default("fr") @db.VarChar
+  created_at DateTime   @default(now()) @db.Timestamptz(6)
+  updated_at DateTime   @default(now()) @db.Timestamptz(6)
+  companies  companies? @relation(fields: [company_id], references: [id], onUpdate: NoAction)
+  users      users      @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([city], map: "ix_profiles_city")
+  @@index([company_id], map: "ix_profiles_company_id")
+  @@index([email], map: "ix_profiles_email")
+}
+
+model roles {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name       String   @unique(map: "ix_roles_name") @db.VarChar
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  updated_at DateTime @default(now()) @db.Timestamptz(6)
+  users      users[]
+}
+
+model search_history {
+  id                String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id           String           @db.Uuid
+  search_type_id    String?          @db.Uuid
+  search_query      String           @db.VarChar
+  results_count     Int              @default(0)
+  execution_time_ms Int?
+  filters_applied   Json?
+  location          Json?
+  created_at        DateTime         @default(now()) @db.Timestamptz(6)
+  updated_at        DateTime         @default(now()) @db.Timestamptz(6)
+  search_types      search_types?    @relation(fields: [search_type_id], references: [id], onUpdate: NoAction)
+  users             users            @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  search_results    search_results[]
+
+  @@index([user_id, created_at], map: "idx_search_history_user_created")
+  @@index([created_at], map: "ix_search_history_created_at")
+  @@index([search_type_id], map: "ix_search_history_search_type_id")
+  @@index([user_id], map: "ix_search_history_user_id")
+}
+
+model search_results {
+  id                String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  search_history_id String         @db.Uuid
+  result_type       String?        @db.VarChar
+  result_data       Json
+  score             Float?
+  created_at        DateTime       @default(now()) @db.Timestamptz(6)
+  updated_at        DateTime       @default(now()) @db.Timestamptz(6)
+  search_history    search_history @relation(fields: [search_history_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([created_at], map: "ix_search_results_created_at")
+  @@index([result_type], map: "ix_search_results_result_type")
+  @@index([search_history_id], map: "ix_search_results_search_history_id")
+}
+
+model search_types {
+  id             String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name           String           @unique(map: "ix_search_types_name") @db.VarChar
+  description    String?          @db.VarChar
+  is_active      Boolean          @default(true)
+  created_at     DateTime         @default(now()) @db.Timestamptz(6)
+  updated_at     DateTime         @default(now()) @db.Timestamptz(6)
+  search_history search_history[]
+
+  @@index([is_active], map: "ix_search_types_is_active")
+}
+
+model test_table {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name       String   @db.VarChar
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+}
+
+model users {
+  id                String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  role_id           String?          @db.Uuid
+  email             String           @unique(map: "ix_users_email") @db.VarChar
+  password_hash     String?          @db.VarChar
+  password          String?          @db.VarChar
+  auth_provider     String?          @db.VarChar
+  email_verified    Boolean          @default(false)
+  email_verified_at DateTime?        @db.Timestamptz(6)
+  avatar_url        String?          @db.VarChar
+  is_active         Boolean          @default(true)
+  last_login_at     DateTime?        @db.Timestamptz(6)
+  created_at        DateTime         @default(now()) @db.Timestamptz(6)
+  updated_at        DateTime         @default(now()) @db.Timestamptz(6)
+  abonnements       abonnements[]
+  api_keys          api_keys[]
+  black_list        black_list[]
+  profiles          profiles?
+  search_history    search_history[]
+  roles             roles?           @relation(fields: [role_id], references: [id], onUpdate: NoAction)
+
+  @@index([created_at], map: "ix_users_created_at")
+  @@index([is_active], map: "ix_users_is_active")
+  @@index([role_id], map: "ix_users_role_id")
+}
