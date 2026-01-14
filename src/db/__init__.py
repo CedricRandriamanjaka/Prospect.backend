@@ -1,16 +1,15 @@
 """
-Module de configuration de la base de données.
+Accès DB (psycopg3) - SQL brut.
 """
-from .database import (
-    engine,
-    SessionLocal,
-    get_db as db_session,
-    get_database_url as get_db_url,
-)
+from .connection import Json, pool, get_database_url, get_conn, fetch_one, fetch_all, execute, test_connection
 
 __all__ = [
-    "engine",
-    "SessionLocal",
-    "db_session",
-    "get_db_url",
+    "Json",
+    "pool",
+    "get_database_url",
+    "get_conn",
+    "fetch_one",
+    "fetch_all",
+    "execute",
+    "test_connection",
 ]

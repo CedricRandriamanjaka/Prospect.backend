@@ -6,12 +6,11 @@ from typing import Optional, Dict, Any
 
 import requests
 
-# Import du modèle et de la session DB
+# Accès DB via SQL brut (psycopg3)
 try:
-    from ..db.database import SessionLocal
-    from ..model.models import OpenStreetMapEnrichi
+    from ..db import fetch_one, execute, Json
     HAS_DB = True
-except ImportError:
+except Exception:
     HAS_DB = False
 
 # --- Optionnel: validation très fiable des numéros au format international (+...)
@@ -521,41 +520,46 @@ def _get_cached_enrichment(website: str) -> Optional[Dict[str, Any]]:
         return None
     
     try:
-        db = SessionLocal()
-        try:
-            cached = db.query(OpenStreetMapEnrichi).filter(
-                OpenStreetMapEnrichi.website == website
-            ).first()
-            
-            if not cached:
-                return None
-            
-            # Récupérer les contacts
-            emails = cached.emails or []
-            telephones = cached.telephones or []
-            whatsapp = cached.whatsapp or []
-            
-            # Utiliser is_empty pour déterminer l'âge maximum du cache
-            # Si is_empty=True (pas de contacts), cache valide seulement 10 jours
-            # Si is_empty=False (contacts présents), cache valide 30 jours
-            max_age_days = 10 if cached.is_empty else 30
-            
-            # Vérifier si les données ont moins de max_age_days
-            now = datetime.now(timezone.utc) if cached.updated_at.tzinfo else datetime.now()
-            age = now - cached.updated_at
-            if age.days >= max_age_days:
-                return None
-            
-            # Retourner les données en cache
-            return {
-                "emails": emails,
-                "telephones": telephones,
-                "whatsapp": whatsapp,
-                "visited_urls": cached.scraped_urls or [],
-                "from_cache": True,
-            }
-        finally:
-            db.close()
+        row = fetch_one(
+            """
+            SELECT
+              emails,
+              telephones,
+              whatsapp,
+              scraped_urls,
+              is_empty,
+              updated_at
+            FROM openstreetmap_enrichi
+            WHERE website = %s
+            LIMIT 1;
+            """,
+            (website,),
+        )
+        if not row:
+            return None
+
+        emails = row.get("emails") or []
+        telephones = row.get("telephones") or []
+        whatsapp = row.get("whatsapp") or []
+        visited_urls = row.get("scraped_urls") or []
+
+        max_age_days = 10 if bool(row.get("is_empty")) else 30
+        updated_at = row.get("updated_at")
+        if not updated_at:
+            return None
+
+        now = datetime.now(timezone.utc) if getattr(updated_at, "tzinfo", None) else datetime.now()
+        age = now - updated_at
+        if age.days >= max_age_days:
+            return None
+
+        return {
+            "emails": emails,
+            "telephones": telephones,
+            "whatsapp": whatsapp,
+            "visited_urls": visited_urls,
+            "from_cache": True,
+        }
     except Exception:
         # En cas d'erreur DB, on continue sans cache
         return None
@@ -583,38 +587,30 @@ def _save_enrichment_to_cache(
     is_empty = not bool(emails or telephones or whatsapp)
     
     try:
-        db = SessionLocal()
-        try:
-            # Chercher un enregistrement existant
-            cached = db.query(OpenStreetMapEnrichi).filter(
-                OpenStreetMapEnrichi.website == website
-            ).first()
-            
-            if cached:
-                # Mettre à jour
-                cached.emails = emails
-                cached.telephones = telephones
-                cached.whatsapp = whatsapp
-                cached.scraped_urls = scraped_urls
-                cached.is_empty = is_empty
-                cached.updated_at = datetime.now(timezone.utc)
-            else:
-                # Créer un nouvel enregistrement
-                cached = OpenStreetMapEnrichi(
-                    website=website,
-                    emails=emails,
-                    telephones=telephones,
-                    whatsapp=whatsapp,
-                    scraped_urls=scraped_urls,
-                    is_empty=is_empty,
-                )
-                db.add(cached)
-            
-            db.commit()
-        except Exception:
-            db.rollback()
-        finally:
-            db.close()
+        execute(
+            """
+            INSERT INTO openstreetmap_enrichi
+              (website, emails, telephones, whatsapp, scraped_urls, is_empty, updated_at)
+            VALUES
+              (%s, %s, %s, %s, %s, %s, now())
+            ON CONFLICT (website)
+            DO UPDATE SET
+              emails = EXCLUDED.emails,
+              telephones = EXCLUDED.telephones,
+              whatsapp = EXCLUDED.whatsapp,
+              scraped_urls = EXCLUDED.scraped_urls,
+              is_empty = EXCLUDED.is_empty,
+              updated_at = now();
+            """,
+            (
+                website,
+                Json(emails or []),
+                Json(telephones or []),
+                Json(whatsapp or []),
+                Json(scraped_urls or []),
+                bool(is_empty),
+            ),
+        )
     except Exception:
         # En cas d'erreur DB, on continue sans sauvegarder
         pass
