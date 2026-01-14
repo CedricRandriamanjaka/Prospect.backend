@@ -1,8 +1,9 @@
 import { Provider } from "@/components/ui/provider"
+import "./globals.css"
 
 export const metadata = {
-  title: "My App",
-  description: "Next.js + Prisma + Chakra UI v3",
+  title: "Prospect.com - Prospection intelligente",
+  description: "Trouvez et enrichissez vos prospects avec un outil moderne et puissant",
 }
 
 export default function RootLayout({ children }) {
