@@ -1,8 +1,7 @@
 """
-Ce module est déprécié. Utilisez database.py et models.py à la racine de src/.
-Conservé pour compatibilité ascendante.
+Module de configuration de la base de données.
 """
-from ..database import (
+from .database import (
     engine,
     SessionLocal,
     get_db as db_session,

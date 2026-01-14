@@ -8,8 +8,8 @@ import requests
 
 # Import du modèle et de la session DB
 try:
-    from ..database import SessionLocal
-    from ..models import OpenStreetMapEnrichi
+    from ..db.database import SessionLocal
+    from ..model.models import OpenStreetMapEnrichi
     HAS_DB = True
 except ImportError:
     HAS_DB = False

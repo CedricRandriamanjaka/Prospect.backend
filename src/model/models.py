@@ -8,7 +8,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import UUID, JSONB, NUMERIC
 from sqlalchemy.orm import relationship
 
-from .database import Base
+from ..db.database import Base
 
 
 class TestTable(Base):

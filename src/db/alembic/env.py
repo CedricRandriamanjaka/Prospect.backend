@@ -22,9 +22,9 @@ if env_path.exists():
     load_dotenv(env_path)
 
 # Imports depuis src/
-from src.database import Base
+from src.db.database import Base
 # Importe tous les modèles pour qu'Alembic les détecte
-from src.models import *
+from src.model.models import *
 
 # Configuration Alembic
 config = context.config

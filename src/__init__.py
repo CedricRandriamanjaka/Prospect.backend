@@ -1,7 +1,7 @@
 """
 Package principal de l'application.
 """
-from .database import (
+from .db.database import (
     Base,
     engine,
     SessionLocal,
@@ -10,7 +10,7 @@ from .database import (
     test_connection,
 )
 
-from .models import (
+from .model.models import (
     TestTable,
 )
 

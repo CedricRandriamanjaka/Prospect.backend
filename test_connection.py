@@ -2,7 +2,7 @@
 Script de test de connexion à la base de données Neon.
 Utilisez ce script pour vérifier que la connexion fonctionne.
 """
-from src.database import test_connection, get_database_url
+from src.db.database import test_connection, get_database_url
 
 def main():
     print("🔍 Test de connexion à Neon...")
