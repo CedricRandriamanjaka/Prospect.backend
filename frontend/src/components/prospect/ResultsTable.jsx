@@ -1,3 +1,4 @@
+// src/components/prospect/ResultsTable.jsx
 "use client"
 
 import { useMemo, useState } from "react"
@@ -9,240 +10,216 @@ import {
   Text,
   Button,
   Badge,
+  Card,
   Input,
   NativeSelect,
-  Tooltip,
-  Flex,
-  SimpleGrid,
-  Card,
   Stat,
   Table,
-  useToast,
 } from "@chakra-ui/react"
 import { FiDownload, FiMail, FiPhone, FiGlobe, FiMapPin } from "react-icons/fi"
 import jsPDF from "jspdf"
 import autoTable from "jspdf-autotable"
+import { Tooltip } from "@/components/ui/tooltip"
 
-export default function ResultsTable({ results, metadata }) {
+export default function ResultsTable({ results = [], metadata = {} }) {
   const [searchTerm, setSearchTerm] = useState("")
-  const [sortConfig, setSortConfig] = useState({ key: "", direction: "asc" })
-  const toast = useToast()
+  const [sortKey, setSortKey] = useState("")
+  const [sortDir, setSortDir] = useState("asc")
 
   const filteredResults = useMemo(() => {
-    let filtered = [...(results || [])]
+    let out = Array.isArray(results) ? [...results] : []
 
-    if (searchTerm) {
+    if (searchTerm.trim()) {
       const term = searchTerm.toLowerCase()
-      filtered = filtered.filter((item) => {
-        return (
-          item.name?.toLowerCase().includes(term) ||
-          item.address?.toLowerCase().includes(term) ||
-          item.city?.toLowerCase().includes(term) ||
-          item.category?.toLowerCase().includes(term)
-        )
+      out = out.filter((item) => {
+        const name = (item?.name || "").toLowerCase()
+        const address = (item?.address || "").toLowerCase()
+        const city = (item?.city || "").toLowerCase()
+        const category = (item?.category || "").toLowerCase()
+        return name.includes(term) || address.includes(term) || city.includes(term) || category.includes(term)
       })
     }
 
-    if (sortConfig.key) {
-      filtered.sort((a, b) => {
-        const aVal = a?.[sortConfig.key] ?? ""
-        const bVal = b?.[sortConfig.key] ?? ""
-        const cmp = aVal.toString().localeCompare(bVal.toString())
-        return sortConfig.direction === "asc" ? cmp : -cmp
+    if (sortKey) {
+      out.sort((a, b) => {
+        const av = (a?.[sortKey] ?? "").toString()
+        const bv = (b?.[sortKey] ?? "").toString()
+        const cmp = av.localeCompare(bv, undefined, { numeric: true, sensitivity: "base" })
+        return sortDir === "asc" ? cmp : -cmp
       })
     }
 
-    return filtered
-  }, [results, searchTerm, sortConfig])
-
-  const handleSort = (key) => {
-    setSortConfig((prev) => ({
-      key,
-      direction: prev.key === key && prev.direction === "asc" ? "desc" : "asc",
-    }))
-  }
+    return out
+  }, [results, searchTerm, sortKey, sortDir])
 
   const getContactCount = (item) => {
-    let count = 0
-    if (item.email) count++
-    if (item.phone) count++
-    if (item.website) count++
-    if (item.whatsapp) count++
-    return count
+    let c = 0
+    if (item?.email) c++
+    if (item?.phone) c++
+    if (item?.website) c++
+    if (item?.whatsapp) c++
+    return c
   }
 
   const exportToPDF = () => {
-    try {
-      const doc = new jsPDF()
-      const margin = 14
+    const doc = new jsPDF()
+    const margin = 14
 
-      doc.setFontSize(18)
-      doc.text("Résultats de prospection", margin, 20)
+    doc.setFontSize(18)
+    doc.text("Résultats de prospection", margin, 20)
 
-      doc.setFontSize(10)
-      let yPos = 30
-      if (metadata?.query) {
-        doc.text(
-          `Recherche: ${metadata.query.where || metadata.query.city || "Coordonnées"}`,
-          margin,
-          yPos
-        )
-        yPos += 7
-      }
-      doc.text(`Nombre de résultats: ${metadata?.count || filteredResults.length}`, margin, yPos)
-      yPos += 7
-      if (metadata?.timings?.total_seconds) {
-        doc.text(`Temps d'exécution: ${metadata.timings.total_seconds}s`, margin, yPos)
-        yPos += 10
-      }
+    doc.setFontSize(10)
+    let y = 30
 
-      const tableData = filteredResults.map((item) => [
-        item.name || "-",
-        item.address || "-",
-        item.city || "-",
-        item.category || "-",
-        item.website ? "Oui" : "Non",
-        item.email ? "Oui" : "Non",
-        item.phone ? "Oui" : "Non",
-        item.whatsapp ? "Oui" : "Non",
-        item.contacts_count || getContactCount(item) || 0,
-      ])
+    if (metadata?.query) {
+      const q = metadata.query?.where || metadata.query?.city || "Coordonnées"
+      doc.text(`Recherche: ${q}`, margin, y)
+      y += 7
+    }
 
-      autoTable(doc, {
-        head: [["Nom", "Adresse", "Ville", "Catégorie", "Site web", "Email", "Téléphone", "WhatsApp", "Contacts"]],
-        body: tableData,
-        startY: yPos,
-        margin: { left: margin, right: margin },
-        styles: { fontSize: 8 },
-      })
+    doc.text(`Nombre de résultats: ${metadata?.count || filteredResults.length}`, margin, y)
+    y += 7
 
-      doc.save(`prospects-${new Date().toISOString().split("T")[0]}.pdf`)
+    if (metadata?.timings?.total_seconds != null) {
+      doc.text(`Temps: ${metadata.timings.total_seconds}s`, margin, y)
+      y += 10
+    }
 
-      toast({
-        title: "Export réussi",
-        description: "Le fichier PDF a été téléchargé",
-        status: "success",
-        duration: 3000,
-        isClosable: true,
-      })
-    } catch (error) {
-      toast({
-        title: "Erreur d'export",
-        description: error?.message || "Erreur inconnue",
-        status: "error",
-        duration: 5000,
-        isClosable: true,
-      })
+    const body = filteredResults.map((item) => [
+      item?.name || "-",
+      item?.address || "-",
+      item?.city || "-",
+      item?.category || "-",
+      item?.website ? "Oui" : "Non",
+      item?.email ? "Oui" : "Non",
+      item?.phone ? "Oui" : "Non",
+      item?.whatsapp ? "Oui" : "Non",
+      getContactCount(item),
+    ])
+
+    autoTable(doc, {
+      head: [["Nom", "Adresse", "Ville", "Catégorie", "Site", "Email", "Téléphone", "WhatsApp", "Contacts"]],
+      body,
+      startY: y,
+      margin: { left: margin, right: margin },
+      styles: { fontSize: 8 },
+    })
+
+    doc.save(`prospects-${new Date().toISOString().split("T")[0]}.pdf`)
+  }
+
+  const onChangeSort = (val) => {
+    if (!val) {
+      setSortKey("")
+      setSortDir("asc")
+      return
+    }
+    if (val === sortKey) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"))
+    } else {
+      setSortKey(val)
+      setSortDir("asc")
     }
   }
 
   return (
     <VStack gap="6" align="stretch">
-      {/* Stats */}
+      {/* Header + stats */}
       <Card.Root>
         <Card.Body>
-          <VStack gap="6" align="stretch">
-            <Flex justify="space-between" align="center" flexWrap="wrap" gap="4">
+          <VStack gap="5" align="stretch">
+            <HStack justify="space-between" align="center" flexWrap="wrap" gap="3">
               <Heading size="lg" fontWeight="800">
-                Résultats de la prospection
+                Résultats
               </Heading>
-              <Button colorPalette="blue" onClick={exportToPDF} fontWeight="600">
+
+              <Button colorPalette="blue" onClick={exportToPDF}>
                 <FiDownload />
-                Exporter en PDF
+                <Box as="span" ml="2">
+                  Export PDF
+                </Box>
               </Button>
-            </Flex>
+            </HStack>
 
-            <SimpleGrid columns={{ base: 2, md: 4 }} gap="4">
-              <Stat.Root>
-                <Stat.Label>Total trouvé</Stat.Label>
-                <Stat.ValueText>{metadata?.count || results.length}</Stat.ValueText>
-                <Stat.HelpText>prospects</Stat.HelpText>
-              </Stat.Root>
-
-              <Stat.Root>
-                <Stat.Label>Affichés</Stat.Label>
-                <Stat.ValueText>{filteredResults.length}</Stat.ValueText>
-                <Stat.HelpText>après filtrage</Stat.HelpText>
-              </Stat.Root>
-
-              {metadata?.timings?.total_seconds ? (
+            <Box>
+              <Box display="grid" gridTemplateColumns={{ base: "repeat(2, 1fr)", md: "repeat(4, 1fr)" }} gap="4">
                 <Stat.Root>
-                  <Stat.Label>Temps</Stat.Label>
-                  <Stat.ValueText>{metadata.timings.total_seconds}s</Stat.ValueText>
-                  <Stat.HelpText>d'exécution</Stat.HelpText>
-                </Stat.Root>
-              ) : null}
-
-              {metadata?.enrich_max > 0 ? (
-                <Stat.Root>
-                  <Stat.Label>Enrichis</Stat.Label>
-                  <Stat.ValueText>{metadata?.timings?.enrichment?.enriched_count || 0}</Stat.ValueText>
+                  <Stat.Label>Total trouvé</Stat.Label>
+                  <Stat.ValueText>{metadata?.count || results.length}</Stat.ValueText>
                   <Stat.HelpText>prospects</Stat.HelpText>
                 </Stat.Root>
-              ) : null}
-            </SimpleGrid>
+
+                <Stat.Root>
+                  <Stat.Label>Affichés</Stat.Label>
+                  <Stat.ValueText>{filteredResults.length}</Stat.ValueText>
+                  <Stat.HelpText>après filtrage</Stat.HelpText>
+                </Stat.Root>
+
+                {metadata?.timings?.total_seconds != null && (
+                  <Stat.Root>
+                    <Stat.Label>Temps</Stat.Label>
+                    <Stat.ValueText>{metadata.timings.total_seconds}s</Stat.ValueText>
+                    <Stat.HelpText>exécution</Stat.HelpText>
+                  </Stat.Root>
+                )}
+
+                {metadata?.enrich_max > 0 && (
+                  <Stat.Root>
+                    <Stat.Label>Enrichis</Stat.Label>
+                    <Stat.ValueText>{metadata?.timings?.enrichment?.enriched_count || 0}</Stat.ValueText>
+                    <Stat.HelpText>prospects</Stat.HelpText>
+                  </Stat.Root>
+                )}
+              </Box>
+            </Box>
           </VStack>
         </Card.Body>
       </Card.Root>
 
-      {/* Recherche + tri */}
+      {/* Filters */}
       <Card.Root>
         <Card.Body>
           <HStack gap="4" flexWrap="wrap">
-            <Box flex="1" minW="200px">
+            <Box flex="1" minW="220px">
               <Input
-                placeholder="Rechercher dans les résultats..."
+                placeholder="Rechercher dans les résultats…"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
             </Box>
 
-            <Box maxW="220px" w="100%">
-              <NativeSelect.Root>
-                <NativeSelect.Field
-                  value={sortConfig.key}
-                  onChange={(e) => {
-                    const key = e.target.value
-                    if (!key) return setSortConfig({ key: "", direction: "asc" })
-                    handleSort(key)
-                  }}
-                >
-                  <option value="">Trier par…</option>
-                  <option value="name">Nom</option>
-                  <option value="city">Ville</option>
-                  <option value="category">Catégorie</option>
-                  <option value="contacts_count">Contacts</option>
-                </NativeSelect.Field>
-                <NativeSelect.Indicator />
-              </NativeSelect.Root>
-            </Box>
+            <NativeSelect.Root w={{ base: "100%", md: "240px" }}>
+              <NativeSelect.Field
+                value={sortKey}
+                onChange={(e) => onChangeSort(e.target.value)}
+              >
+                <option value="">Trier par…</option>
+                <option value="name">Nom</option>
+                <option value="city">Ville</option>
+                <option value="category">Catégorie</option>
+                <option value="contacts_count">Contacts</option>
+              </NativeSelect.Field>
+            </NativeSelect.Root>
+
+            {sortKey ? (
+              <Badge colorPalette="blue" variant="subtle">
+                {sortDir === "asc" ? "↑" : "↓"} {sortKey}
+              </Badge>
+            ) : null}
           </HStack>
         </Card.Body>
       </Card.Root>
 
-      {/* Tableau */}
+      {/* Table */}
       <Card.Root>
         <Card.Body p="0">
           <Box overflowX="auto">
-            <Table.Root size="sm">
+            <Table.Root size="sm" variant="outline">
               <Table.Header>
                 <Table.Row>
-                  <Table.ColumnHeader
-                    cursor="pointer"
-                    onClick={() => handleSort("name")}
-                  >
-                    Nom {sortConfig.key === "name" ? (sortConfig.direction === "asc" ? "↑" : "↓") : ""}
-                  </Table.ColumnHeader>
-
+                  <Table.ColumnHeader>Nom</Table.ColumnHeader>
                   <Table.ColumnHeader>Adresse</Table.ColumnHeader>
-
-                  <Table.ColumnHeader
-                    cursor="pointer"
-                    onClick={() => handleSort("city")}
-                  >
-                    Ville {sortConfig.key === "city" ? (sortConfig.direction === "asc" ? "↑" : "↓") : ""}
-                  </Table.ColumnHeader>
-
+                  <Table.ColumnHeader>Ville</Table.ColumnHeader>
                   <Table.ColumnHeader>Catégorie</Table.ColumnHeader>
                   <Table.ColumnHeader>Contacts</Table.ColumnHeader>
                   <Table.ColumnHeader>Détails</Table.ColumnHeader>
@@ -252,24 +229,30 @@ export default function ResultsTable({ results, metadata }) {
               <Table.Body>
                 {filteredResults.length === 0 ? (
                   <Table.Row>
-                    <Table.Cell colSpan={6} textAlign="center" py="8">
-                      <Text color="fg.muted">Aucun résultat trouvé</Text>
+                    <Table.Cell colSpan={6}>
+                      <Box py="8" textAlign="center">
+                        <Text color="fg.muted">Aucun résultat</Text>
+                      </Box>
                     </Table.Cell>
                   </Table.Row>
                 ) : (
-                  filteredResults.map((item, index) => (
-                    <Table.Row key={index} _hover={{ bg: "bg.subtle" }}>
-                      <Table.Cell fontWeight="600">{item.name || "-"}</Table.Cell>
+                  filteredResults.map((item, idx) => (
+                    <Table.Row key={idx}>
+                      <Table.Cell fontWeight="700">{item?.name || "-"}</Table.Cell>
 
                       <Table.Cell>
-                        <VStack align="flex-start" gap="1">
-                          {item.address ? (
-                            <HStack gap="1">
+                        <VStack align="start" gap="1">
+                          {item?.address ? (
+                            <HStack gap="2">
                               <FiMapPin size="12" />
                               <Text fontSize="sm">{item.address}</Text>
                             </HStack>
-                          ) : null}
-                          {item.postcode ? (
+                          ) : (
+                            <Text fontSize="sm" color="fg.muted">
+                              -
+                            </Text>
+                          )}
+                          {item?.postcode ? (
                             <Text fontSize="xs" color="fg.muted">
                               {item.postcode}
                             </Text>
@@ -277,50 +260,54 @@ export default function ResultsTable({ results, metadata }) {
                         </VStack>
                       </Table.Cell>
 
-                      <Table.Cell>{item.city || "-"}</Table.Cell>
+                      <Table.Cell>{item?.city || "-"}</Table.Cell>
 
                       <Table.Cell>
-                        {item.category ? (
-                          <Badge colorPalette="cyan" variant="subtle">
+                        {item?.category ? (
+                          <Badge colorPalette="blue" variant="subtle">
                             {item.category}
                           </Badge>
-                        ) : null}
+                        ) : (
+                          <Text fontSize="sm" color="fg.muted">
+                            -
+                          </Text>
+                        )}
                       </Table.Cell>
 
                       <Table.Cell>
-                        <VStack align="flex-start" gap="1">
+                        <VStack align="start" gap="2">
                           <Badge colorPalette="green" variant="solid">
                             {getContactCount(item)} contact{getContactCount(item) > 1 ? "s" : ""}
                           </Badge>
 
                           <HStack gap="2" flexWrap="wrap">
-                            {item.website ? (
+                            {item?.website ? (
                               <Tooltip content={item.website}>
-                                <Badge colorPalette="blue" variant="outline">
+                                <Badge variant="outline" colorPalette="blue">
                                   <FiGlobe size="10" />
                                 </Badge>
                               </Tooltip>
                             ) : null}
 
-                            {item.email ? (
+                            {item?.email ? (
                               <Tooltip content={item.email}>
-                                <Badge colorPalette="purple" variant="outline">
+                                <Badge variant="outline" colorPalette="purple">
                                   <FiMail size="10" />
                                 </Badge>
                               </Tooltip>
                             ) : null}
 
-                            {item.phone ? (
+                            {item?.phone ? (
                               <Tooltip content={item.phone}>
-                                <Badge colorPalette="green" variant="outline">
+                                <Badge variant="outline" colorPalette="green">
                                   <FiPhone size="10" />
                                 </Badge>
                               </Tooltip>
                             ) : null}
 
-                            {item.whatsapp ? (
+                            {item?.whatsapp ? (
                               <Tooltip content={item.whatsapp}>
-                                <Badge colorPalette="green" variant="outline">
+                                <Badge variant="outline" colorPalette="green">
                                   WhatsApp
                                 </Badge>
                               </Tooltip>
@@ -330,11 +317,11 @@ export default function ResultsTable({ results, metadata }) {
                       </Table.Cell>
 
                       <Table.Cell>
-                        <VStack align="flex-start" gap="1">
-                          {item.website ? (
+                        <VStack align="start" gap="1">
+                          {item?.website ? (
                             <Text
                               fontSize="xs"
-                              color="cyan.fg"
+                              color="blue.600"
                               as="a"
                               href={item.website}
                               target="_blank"
@@ -344,12 +331,21 @@ export default function ResultsTable({ results, metadata }) {
                             </Text>
                           ) : null}
 
-                          {item.email ? <Text fontSize="xs">{item.email}</Text> : null}
-                          {item.phone ? <Text fontSize="xs">{item.phone}</Text> : null}
-
-                          {typeof item.distance === "number" ? (
+                          {item?.email ? (
                             <Text fontSize="xs" color="fg.muted">
-                              {item.distance.toFixed(2)} km
+                              {item.email}
+                            </Text>
+                          ) : null}
+
+                          {item?.phone ? (
+                            <Text fontSize="xs" color="fg.muted">
+                              {item.phone}
+                            </Text>
+                          ) : null}
+
+                          {item?.distance != null ? (
+                            <Text fontSize="xs" color="fg.muted">
+                              {Number(item.distance).toFixed(2)} km
                             </Text>
                           ) : null}
                         </VStack>

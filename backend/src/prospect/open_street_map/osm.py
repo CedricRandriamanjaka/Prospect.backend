@@ -10,15 +10,12 @@ from typing import Optional, Dict, Any, List, Tuple
 import requests
 
 OVERPASS_ENDPOINTS = [
-    "https://overpass-api.de/api/interpreter",  # Allemagne - principal
-    "https://overpass.private.coffee/api/interpreter",  # Privé mais public
-    "https://overpass.kumi.systems/api/interpreter",  # Kumi Systems
-    "https://api.openstreetmap.fr/oapi/interpreter",  # France
-    "https://overpass.openstreetmap.ru/api/interpreter",  # Russie
-    "https://overpass.openstreetmap.ru/cgi/interpreter",  # Russie (alternative)
-    "https://overpass.osm.ch/api/interpreter",  # Suisse
-    "https://overpass.nchc.org.tw/api/interpreter",  # Taïwan
-    "https://overpass.openstreetmap.ie/api/interpreter",  # Irlande
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.private.coffee/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://api.openstreetmap.fr/oapi/interpreter",
+    "https://overpass.openstreetmap.ru/api/interpreter",
+    "https://overpass.openstreetmap.ru/cgi/interpreter",
 ]
 
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
@@ -200,7 +197,7 @@ def _overpass_request(query: str, session: requests.Session) -> dict:
 
     # Utiliser jusqu'à 5 endpoints pour plus de fiabilité (au lieu de 3)
     # On garde un timeout global pour éviter d'attendre trop longtemps
-    endpoints = OVERPASS_ENDPOINTS[:5].copy()
+    endpoints = OVERPASS_ENDPOINTS[:3].copy()
     random.shuffle(endpoints)
 
     for url in endpoints:
