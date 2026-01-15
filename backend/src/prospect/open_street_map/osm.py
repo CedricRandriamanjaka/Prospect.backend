@@ -268,6 +268,22 @@ def _split_multi(value: str) -> list[str]:
             out.append(p)
     return out
 
+SOCIAL_KEYS = [
+    "contact:facebook", "contact:instagram", "contact:linkedin", "contact:twitter",
+    "contact:tiktok", "contact:youtube", "contact:telegram",
+    "whatsapp", "contact:whatsapp"
+]
+
+EXTRA_KEYS = [
+    "description", "short_name", "alt_name", "official_name",
+    "opening_hours", "stars", "hotel:stars", "cuisine",
+    "delivery", "takeaway", "smoking", "internet_access", "wifi",
+    "wheelchair", "toilets:wheelchair",
+    "wikidata", "wikipedia",
+    "brand", "brand:wikidata", "brand:wikipedia",
+    "operator", "operator:wikidata",
+    "addr:full"
+]
 
 def _parse_elements(data: dict) -> list[dict]:
     out = []
@@ -294,7 +310,7 @@ def _parse_elements(data: dict) -> list[dict]:
         if lat is None or lon is None:
             continue
 
-        # activity type/value (première clé reconnue)
+        # activité (première clé connue)
         activity_key = None
         activity_value = None
         for k in DEFAULT_POI_KEYS:
@@ -326,6 +342,7 @@ def _parse_elements(data: dict) -> list[dict]:
         whatsapp = list(dict.fromkeys(whatsapp))
 
         address = {
+            "full": tags.get("addr:full"),
             "housenumber": tags.get("addr:housenumber"),
             "street": tags.get("addr:street"),
             "postcode": tags.get("addr:postcode"),
@@ -333,36 +350,62 @@ def _parse_elements(data: dict) -> list[dict]:
             "country": tags.get("addr:country"),
         }
 
-        stars = tags.get("stars") or tags.get("hotel:stars")
-        opening_hours = tags.get("opening_hours")
-        operator_ = tags.get("operator")
-        brand = tags.get("brand")
-        cuisine = tags.get("cuisine")
+        # social contacts
+        contacts_social = {}
+        for k in SOCIAL_KEYS:
+            v = (tags.get(k) or "").strip()
+            if v:
+                contacts_social[k] = v
+
+        # extras whitelist (pratique)
+        extras = {}
+        for k in EXTRA_KEYS:
+            v = tags.get(k)
+            if v is not None and str(v).strip() != "":
+                extras[k] = v
+
+        # payment:* (ex: payment:visa=yes)
+        payment = {}
+        for k, v in tags.items():
+            if isinstance(k, str) and k.startswith("payment:"):
+                if v is not None and str(v).strip() != "":
+                    payment[k] = v
 
         out.append({
             "entity_key": entity_key,
             "nom": name,
             "activite_type": activity_key,
             "activite_valeur": activity_value,
+
             "site": website,
             "emails": emails,
             "telephones": phones,
             "whatsapp": whatsapp,
-            "etoiles": stars,
-            "cuisine": cuisine,
-            "horaires": opening_hours,
-            "operateur": operator_,
-            "marque": brand,
+
             "adresse": address,
+
+            # champs “business”
+            "etoiles": tags.get("stars") or tags.get("hotel:stars"),
+            "cuisine": tags.get("cuisine"),
+            "horaires": tags.get("opening_hours"),
+            "operateur": tags.get("operator"),
+            "marque": tags.get("brand"),
+
+            # nouveaux blocs
+            "contacts_social": contacts_social,
+            "payment": payment,
+            "extras": extras,
+
             "lat": float(lat),
             "lon": float(lon),
             "osm": f"https://www.openstreetmap.org/{el_type}/{el_id}",
             "source": "OpenStreetMap",
-            "raw_tags": tags,  # optionnel: utile si tu veux tout garder
+
+            # le plus important pour “encore plus de données”
+            "raw_tags": tags,
         })
 
     return out
-
 
 def get_prospects(
     *,
