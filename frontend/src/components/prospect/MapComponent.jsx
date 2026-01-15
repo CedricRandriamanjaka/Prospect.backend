@@ -2,7 +2,7 @@
 "use client"
 
 import { useEffect } from "react"
-import { Box } from "@chakra-ui/react"
+import { Box, Text, VStack } from "@chakra-ui/react"
 import { MapContainer, TileLayer, Marker, Circle, useMapEvents, useMap } from "react-leaflet"
 import L from "leaflet"
 import "leaflet/dist/leaflet.css"
@@ -33,7 +33,7 @@ function MapCenter({ center, zoom }) {
   return null
 }
 
-export default function MapComponent({ onMapClick, selectedLat, selectedLon, radius = 5 }) {
+export default function MapComponent({ onMapClick, selectedLat, selectedLon, radius = 5, radiusMin = 0 }) {
   const defaultCenter = [48.8566, 2.3522] // Paris
   const defaultZoom = 6
 
@@ -43,13 +43,16 @@ export default function MapComponent({ onMapClick, selectedLat, selectedLon, rad
 
   return (
     <Box
-      h="500px"
+      h="600px"
       w="100%"
-      rounded="lg"
+      rounded="xl"
       overflow="hidden"
-      borderWidth="1px"
+      borderWidth="2px"
       borderColor="border"
       bg="bg.subtle"
+      shadow="lg"
+      position="relative"
+      _dark={{ borderColor: "border" }}
     >
       <MapContainer center={center} zoom={zoom} style={{ height: "100%", width: "100%" }} scrollWheelZoom>
         <TileLayer
@@ -63,21 +66,86 @@ export default function MapComponent({ onMapClick, selectedLat, selectedLon, rad
         {hasPoint ? (
           <>
             <Marker position={[selectedLat, selectedLon]} />
-            {radius > 0 ? (
+            {radius > 0 && (
               <Circle
                 center={[selectedLat, selectedLon]}
                 radius={radius * 1000}
                 pathOptions={{
-                  color: "#0ea5e9",
-                  fillColor: "#0ea5e9",
-                  fillOpacity: 0.18,
-                  weight: 2,
+                  color: "#3b82f6",
+                  fillColor: "#3b82f6",
+                  fillOpacity: 0.15,
+                  weight: 3,
                 }}
               />
-            ) : null}
+            )}
+            {radiusMin > 0 && (
+              <Circle
+                center={[selectedLat, selectedLon]}
+                radius={radiusMin * 1000}
+                pathOptions={{
+                  color: "#60a5fa",
+                  fillColor: "#60a5fa",
+                  fillOpacity: 0.1,
+                  weight: 2,
+                  dashArray: "5, 5",
+                }}
+              />
+            )}
           </>
         ) : null}
       </MapContainer>
+
+      {/* Overlay avec instructions */}
+      {!hasPoint && (
+        <Box
+          position="absolute"
+          top="4"
+          left="4"
+          right="4"
+          bg="white"
+          _dark={{ bg: "gray.800" }}
+          p="3"
+          rounded="lg"
+          shadow="md"
+          borderWidth="1px"
+          borderColor="border"
+          zIndex="1000"
+        >
+          <Text fontSize="sm" fontWeight="600" color="blue.600" _dark={{ color: "blue.400" }}>
+            🗺️ Cliquez sur la carte pour sélectionner une position
+          </Text>
+        </Box>
+      )}
+
+      {hasPoint && (
+        <Box
+          position="absolute"
+          bottom="4"
+          left="4"
+          bg="white"
+          _dark={{ bg: "gray.800" }}
+          p="3"
+          rounded="lg"
+          shadow="md"
+          borderWidth="1px"
+          borderColor="border"
+          zIndex="1000"
+        >
+          <VStack align="start" gap="1">
+            <Text fontSize="xs" fontWeight="600" color="fg.muted">
+              Position sélectionnée
+            </Text>
+            <Text fontSize="sm" fontWeight="700">
+              {selectedLat.toFixed(6)}, {selectedLon.toFixed(6)}
+            </Text>
+            {radius > 0 && (
+              <Text fontSize="xs" color="blue.600" _dark={{ color: "blue.400" }}>
+                Rayon: {radiusMin > 0 ? `${radiusMin}-${radius} km` : `${radius} km`}
+              </Text>
+            )}
+          </VStack>
+        </Box>
+      )}
     </Box>
   )
 }

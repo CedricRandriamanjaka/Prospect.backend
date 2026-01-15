@@ -5,34 +5,36 @@ import { useState, useCallback, useRef } from "react"
 import dynamic from "next/dynamic"
 import {
   Box,
-  Button,
   Container,
-  Heading,
   VStack,
   HStack,
   Text,
-  Input,
   Card,
   Progress,
   Alert,
+  Grid,
+  GridItem,
 } from "@chakra-ui/react"
-import { FiSearch, FiRefreshCw, FiMap } from "react-icons/fi"
+import { FiMap, FiX } from "react-icons/fi"
 
 import Navbar from "@/components/layout/Navbar"
 import Footer from "@/components/layout/Footer"
 import ResultsTable from "@/components/prospect/ResultsTable"
+import SearchForm from "@/components/prospect/SearchForm"
 
 // Import dynamique de la carte pour éviter SSR
 const MapComponent = dynamic(() => import("@/components/prospect/MapComponent"), {
   ssr: false,
   loading: () => (
     <Box
-      h="500px"
+      h="600px"
       bg="bg.subtle"
-      rounded="lg"
+      rounded="xl"
       display="flex"
       alignItems="center"
       justifyContent="center"
+      borderWidth="2px"
+      borderColor="border"
     >
       <Text color="fg.muted">Chargement de la carte...</Text>
     </Box>
@@ -46,9 +48,12 @@ export default function ProspectPage() {
   const [results, setResults] = useState(null)
   const [error, setError] = useState(null)
   const [progress, setProgress] = useState(0)
-  const [queryParams, setQueryParams] = useState("")
+  const [searchParams, setSearchParams] = useState("")
   const [lat, setLat] = useState(null)
   const [lon, setLon] = useState(null)
+  const [radius, setRadius] = useState(5)
+  const [radiusMin, setRadiusMin] = useState(0)
+  const [showMap, setShowMap] = useState(true)
 
   const abortControllerRef = useRef(null)
 
@@ -57,183 +62,182 @@ export default function ProspectPage() {
     setLon(clickedLon)
   }, [])
 
-  const performSearch = useCallback(async () => {
-    // Construire les paramètres
-    let params = queryParams.trim()
+  const handleSearch = useCallback(
+    async (params) => {
+      // Ajouter les coordonnées si sélectionnées
+      let finalParams = params
 
-    // Si lat/lon sont définis, les ajouter
-    if (lat !== null && lon !== null) {
-      const latLonParams = `lat=${lat}&lon=${lon}`
-      if (params) {
-        params = `${latLonParams}&${params}`
-      } else {
-        params = latLonParams
-      }
-    }
-
-    if (!params) {
-      setError("Entrer des paramètres de recherche ou sélectionner une position sur la carte.")
-      return
-    }
-
-    if (abortControllerRef.current) abortControllerRef.current.abort()
-    abortControllerRef.current = new AbortController()
-
-    setLoading(true)
-    setError(null)
-    setResults(null)
-    setProgress(0)
-
-    let progressInterval = null
-    try {
-      progressInterval = setInterval(() => {
-        setProgress((prev) => {
-          if (prev >= 92) return prev
-          const bump = 3 + Math.random() * 9
-          return Math.min(92, prev + bump)
-        })
-      }, 450)
-
-      const res = await fetch(`${API_URL}/prospects?${params}`, {
-        signal: abortControllerRef.current.signal,
-      })
-
-      if (!res.ok) {
-        const errJson = await res.json().catch(() => ({ detail: "Erreur inconnue" }))
-        throw new Error(errJson.detail || `Erreur ${res.status}`)
+      if (lat !== null && lon !== null) {
+        const latLonParams = `lat=${lat}&lon=${lon}`
+        if (finalParams) {
+          finalParams = `${latLonParams}&${finalParams}`
+        } else {
+          finalParams = latLonParams
+        }
       }
 
-      const data = await res.json()
-      setProgress(100)
-      setResults(data)
-    } catch (err) {
-      if (err?.name === "AbortError") return
-      setError(err?.message || "Erreur lors de la recherche.")
+      if (!finalParams && lat === null && lon === null) {
+        setError("Veuillez entrer une localisation ou sélectionner une position sur la carte.")
+        return
+      }
+
+      setSearchParams(finalParams)
+
+      if (abortControllerRef.current) abortControllerRef.current.abort()
+      abortControllerRef.current = new AbortController()
+
+      setLoading(true)
+      setError(null)
+      setResults(null)
       setProgress(0)
-    } finally {
-      if (progressInterval) clearInterval(progressInterval)
-      setLoading(false)
-      setTimeout(() => setProgress(0), 900)
-    }
-  }, [queryParams, lat, lon])
+
+      let progressInterval = null
+      try {
+        progressInterval = setInterval(() => {
+          setProgress((prev) => {
+            if (prev >= 92) return prev
+            const bump = 3 + Math.random() * 9
+            return Math.min(92, prev + bump)
+          })
+        }, 450)
+
+        const res = await fetch(`${API_URL}/prospects?${finalParams}`, {
+          signal: abortControllerRef.current.signal,
+        })
+
+        if (!res.ok) {
+          const errJson = await res.json().catch(() => ({ detail: "Erreur inconnue" }))
+          throw new Error(errJson.detail || `Erreur ${res.status}`)
+        }
+
+        const data = await res.json()
+        setProgress(100)
+        setResults(data)
+      } catch (err) {
+        if (err?.name === "AbortError") return
+        setError(err?.message || "Erreur lors de la recherche.")
+        setProgress(0)
+      } finally {
+        if (progressInterval) clearInterval(progressInterval)
+        setLoading(false)
+        setTimeout(() => setProgress(0), 900)
+      }
+    },
+    [lat, lon]
+  )
 
   const handleReset = () => {
-    setQueryParams("")
+    setSearchParams("")
     setLat(null)
     setLon(null)
+    setRadius(5)
+    setRadiusMin(0)
     setResults(null)
     setError(null)
   }
 
   return (
-    <Box minH="100vh" display="flex" flexDirection="column">
+    <Box minH="100vh" display="flex" flexDirection="column" bg="bg.canvas">
       <Navbar />
 
-      <Container maxW="7xl" py="8" flex="1">
+      <Container maxW="8xl" py="6" flex="1">
         <VStack gap="6" align="stretch">
-          <Heading size="2xl" fontWeight="800" textAlign="center">
-            Prospection de Prospects
-          </Heading>
+          {/* Layout principal: Formulaire + Carte côte à côte */}
+          <Grid templateColumns={{ base: "1fr", lg: "1fr 1fr" }} gap="6">
+            {/* Formulaire de recherche */}
+            <GridItem>
+              <SearchForm
+                onSearch={handleSearch}
+                loading={loading}
+                onRadiusChange={(newRadius, newRadiusMin) => {
+                  setRadius(newRadius)
+                  setRadiusMin(newRadiusMin)
+                }}
+                initialRadius={radius}
+                initialRadiusMin={radiusMin}
+              />
+            </GridItem>
 
-          {/* Carte pour sélectionner la position */}
-          <Card.Root>
-            <Card.Body>
-              <VStack gap="4" align="stretch">
-                <HStack justify="space-between" align="center">
-                  <Heading size="md" fontWeight="700">
-                    Sélectionner une position (optionnel)
-                  </Heading>
-                  {lat !== null && lon !== null && (
-                    <Text fontSize="sm" color="fg.muted">
-                      Position: {lat.toFixed(6)}, {lon.toFixed(6)}
-                    </Text>
-                  )}
-                </HStack>
-                <MapComponent
-                  onMapClick={handleMapClick}
-                  selectedLat={lat}
-                  selectedLon={lon}
-                />
-                <Text fontSize="sm" color="fg.muted" textAlign="center">
-                  Cliquez sur la carte pour sélectionner une position. Les coordonnées seront ajoutées automatiquement aux paramètres.
-                </Text>
-              </VStack>
-            </Card.Body>
-          </Card.Root>
-
-          {/* Input pour les paramètres */}
-          <Card.Root>
-            <Card.Body>
-              <VStack gap="4" align="stretch">
-                <Heading size="md" fontWeight="700">
-                  Paramètres de recherche
-                </Heading>
-
-                <Box>
-                  <Text fontSize="sm" fontWeight="600" mb="2">
-                    Paramètres URL (après le `?`)
-                  </Text>
-                  <Input
-                    placeholder="Ex: where=Maurice&radius_min_km=0&radius_km=5&tags=shop=beauty,shop=cosmetics,shop=perfumery&number=200"
-                    value={queryParams}
-                    onChange={(e) => setQueryParams(e.target.value)}
-                    size="lg"
-                  />
-                  <Text fontSize="xs" color="fg.muted" mt="2">
-                    Exemples:
-                    <br />
-                    • <code>where=Maurice&category=hotel&has=website&min_contacts=1&number=30&enrich_max=5</code>
-                    <br />
-                    • <code>where=Paris&radius_min_km=0&radius_km=2&category=restaurant&number=20</code>
-                    <br />
-                    • <code>tags=shop=beauty,shop=cosmetics&number=100</code>
-                  </Text>
-                </Box>
-
-                <HStack gap="3" justify="flex-end">
-                  <Button variant="outline" onClick={handleReset} disabled={loading}>
-                    <FiRefreshCw />
-                    <Box as="span" ml="2">
-                      Réinitialiser
+            {/* Carte interactive */}
+            <GridItem>
+              <Card.Root
+                shadow="lg"
+                borderWidth="1px"
+                borderColor="border.subtle"
+                bg="surface"
+                _dark={{ bg: "surface", borderColor: "border" }}
+                position="relative"
+              >
+                <Card.Body p="0">
+                  <Box position="relative">
+                    <MapComponent
+                      onMapClick={handleMapClick}
+                      selectedLat={lat}
+                      selectedLon={lon}
+                      radius={radius}
+                      radiusMin={radiusMin}
+                    />
+                    {/* Bouton pour masquer/afficher la carte */}
+                    <Box
+                      position="absolute"
+                      top="4"
+                      right="4"
+                      zIndex="1000"
+                    >
+                      <Card.Root size="sm" shadow="md">
+                        <Card.Body p="2">
+                          <HStack gap="2">
+                            <FiMap size="14" color="var(--chakra-colors-fg-muted)" />
+                            <Text fontSize="xs" color="fg.muted">
+                              Carte
+                            </Text>
+                          </HStack>
+                        </Card.Body>
+                      </Card.Root>
                     </Box>
-                  </Button>
-                  <Button
-                    colorPalette="blue"
-                    size="lg"
-                    onClick={performSearch}
-                    loading={loading}
-                    loadingText="Recherche..."
-                    disabled={loading || (!queryParams.trim() && lat === null)}
-                  >
-                    <FiSearch />
-                    <Box as="span" ml="2">
-                      Lancer la recherche
-                    </Box>
-                  </Button>
-                </HStack>
-              </VStack>
-            </Card.Body>
-          </Card.Root>
+                  </Box>
+                </Card.Body>
+              </Card.Root>
+            </GridItem>
+          </Grid>
 
-          {/* Progress */}
+          {/* Progress bar élégante */}
           {loading && (
-            <Card.Root>
-              <Card.Body>
-                <VStack gap="4">
+            <Card.Root shadow="md" borderWidth="1px" borderColor="border.subtle">
+              <Card.Body p="4">
+                <VStack gap="3">
                   <HStack w="100%" justify="space-between">
-                    <Text fontWeight="700">Recherche en cours…</Text>
-                    <Text fontSize="sm" color="fg.muted">
+                    <HStack gap="2">
+                      <Box
+                        w="3"
+                        h="3"
+                        rounded="full"
+                        bg="blue.500"
+                        animation="pulse 1.5s ease-in-out infinite"
+                      />
+                      <Text fontWeight="700" fontSize="sm">
+                        Recherche en cours…
+                      </Text>
+                    </HStack>
+                    <Text fontSize="sm" color="fg.muted" fontWeight="600">
                       {Math.round(progress)}%
                     </Text>
                   </HStack>
 
-                  <Progress.Root value={progress} size="lg" w="100%" rounded="full" colorPalette="blue">
+                  <Progress.Root
+                    value={progress}
+                    size="lg"
+                    w="100%"
+                    rounded="full"
+                    colorPalette="blue"
+                    bg="bg.subtle"
+                  >
                     <Progress.Track>
                       <Progress.Range />
                     </Progress.Track>
                   </Progress.Root>
 
-                  <Text fontSize="sm" color="fg.muted" textAlign="center">
+                  <Text fontSize="xs" color="fg.muted" textAlign="center">
                     La durée dépend des paramètres de recherche et de l'enrichissement.
                   </Text>
                 </VStack>
@@ -243,23 +247,54 @@ export default function ProspectPage() {
 
           {/* Erreur */}
           {error && (
-            <Alert.Root status="error" variant="subtle" rounded="lg">
+            <Alert.Root
+              status="error"
+              variant="subtle"
+              rounded="lg"
+              shadow="md"
+              borderWidth="1px"
+              borderColor="red.200"
+              _dark={{ borderColor: "red.800" }}
+            >
               <Alert.Indicator />
-              <Alert.Content>{error}</Alert.Content>
+              <Alert.Content>
+                <HStack justify="space-between" align="center" w="100%">
+                  <Text fontWeight="600">{error}</Text>
+                  <Box
+                    as="button"
+                    onClick={() => setError(null)}
+                    p="1"
+                    rounded="md"
+                    _hover={{ bg: "bg.subtle" }}
+                  >
+                    <FiX size="16" />
+                  </Box>
+                </HStack>
+              </Alert.Content>
             </Alert.Root>
           )}
 
           {/* Résultats */}
           {results && !loading && (
-            <ResultsTable
-              results={results.results || []}
-              metadata={results}
-            />
+            <Box>
+              <ResultsTable results={results.results || []} metadata={results} />
+            </Box>
           )}
         </VStack>
       </Container>
 
       <Footer />
+
+      <style jsx global>{`
+        @keyframes pulse {
+          0%, 100% {
+            opacity: 1;
+          }
+          50% {
+            opacity: 0.5;
+          }
+        }
+      `}</style>
     </Box>
   )
 }
