@@ -1,6 +1,6 @@
-"""Routes FastAPI pour l'API."""
 from time import perf_counter
 from fastapi import APIRouter, Query, HTTPException
+
 from src.controller.prospect_controller import ProspectController
 
 router = APIRouter()
@@ -8,90 +8,61 @@ router = APIRouter()
 
 @router.get("/health")
 def health():
-    """Endpoint de santé."""
     return {"ok": True}
 
 
 @router.get("/prospects")
 def prospects(
-    # Texte libre
-    where: str | None = Query(None, min_length=2, description="Ville/quartier/adresse/lieu..."),
-    # Backward compatible
-    city: str | None = Query(None, min_length=2, description="Ancien paramètre (optionnel)."),
-    # Clic carte
-    lat: float | None = Query(None, ge=-90),
-    lon: float | None = Query(None, ge=-180),
+    # Localisation
+    where: str | None = Query(None, min_length=2, description="Champ libre localisation (ville/adresse/lieu…)"),
+    lat: float | None = Query(None, ge=-90, le=90, description="Latitude (point manuel)"),
+    lon: float | None = Query(None, ge=-180, le=180, description="Longitude (point manuel)"),
+
     # Rayon
-    radius_km: float | None = Query(None, gt=0, description="Rayon max en km"),
-    radius_min_km: float | None = Query(None, ge=0, description="Rayon min en km (anneau)"),
-    # Tags / filtres OSM
+    radius_km: float | None = Query(None, gt=0, description="km max"),
+    radius_min_km: float | None = Query(None, ge=0, description="km min (anneau)"),
+
+    # Filtre métier
+    category: str | None = Query(None, description="Ex: restaurant, spa, hotel…"),
     tags: str | None = Query(
         None,
         description=(
-            "Filtres tags: "
-            "ex 'restaurant,hotel,spa' "
-            "ou 'amenity=restaurant,tourism=hotel,shop=bakery' "
-            "ou 'amenity,shop,tourism'"
+            "Filtre OSM: "
+            "ex 'amenity=restaurant' ou 'shop=bakery,tourism=hotel' "
+            "ou 'amenity,shop,tourism' (clés) "
+            "ou 'restaurant,spa' (valeurs)"
         ),
     ),
-    # Catégorie business simple (optionnel)
-    category: str | None = Query(None, description="Ex: restaurant, hotel, spa, bakery, pharmacy..."),
-    # Nombre final renvoyé
-    number: int = Query(20, ge=1),
-    # Enrichissement
-    enrich_max: int = Query(0, ge=0),
-    # Filtres prospection
-    has: str | None = Query(None, description="Ex: website,email,phone,whatsapp"),
-    min_contacts: int = Query(0, ge=0),
-    exclude_names: str | None = Query(None, description="Mots à exclure dans nom. Ex: mairie, police"),
-    exclude_brands: str | None = Query(None, description="Exclure marque/opérateur. Ex: kfc, carrefour"),
-    # Tri / dédup
-    sort: str = Query("contacts", description="contacts|distance|name|random"),
-    dedupe: str = Query("smart", description="none|strict|smart"),
-    seed: int | None = Query(None, description="Seed pour sort=random"),
-    # Vue
-    view: str = Query("full", description="full|light"),
-    # Stats
-    include_coverage: bool = Query(True),
+
+    # Résultats
+    limit: int = Query(20, ge=1, le=200, description="Nombre de résultats"),
+    enrich: bool = Query(False, description="Si true: scrape tous les résultats retournés qui ont un site web"),
 ):
-    """Recherche de prospects."""
-    if not (where or city or (lat is not None and lon is not None)):
+    if not (where or (lat is not None and lon is not None)):
         raise HTTPException(
             status_code=422,
-            detail="Paramètres requis: where=... OU lat=...&lon=... (city accepté aussi).",
+            detail="Paramètres requis: where=... OU lat=...&lon=...",
         )
 
-    t_total0 = perf_counter()
-
+    t0 = perf_counter()
     try:
-        result = ProspectController.search_prospects(
+        resp = ProspectController.search_prospects(
             where=where,
-            city=city,
             lat=lat,
             lon=lon,
             radius_km=radius_km,
-            radius_min_km=radius_min_km,  # ✅ AJOUT IMPORTANT
-            tags=tags,
+            radius_min_km=radius_min_km,
             category=category,
-            number=number,
-            enrich_max=enrich_max,
-            has=has,
-            min_contacts=min_contacts,
-            exclude_names=exclude_names,
-            exclude_brands=exclude_brands,
-            sort=sort,
-            dedupe=dedupe,
-            view=view,
-            seed=seed,
-            include_coverage=include_coverage,
+            tags=tags,
+            limit=limit,
+            enrich=enrich,
         )
+        resp.setdefault("timings", {})
+        resp["timings"]["total_seconds"] = round(perf_counter() - t0, 3)
+        return resp
 
-        total_seconds = perf_counter() - t_total0
-        result["timings"]["total_seconds"] = round(total_seconds, 3)
-
-        return result
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e))
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
