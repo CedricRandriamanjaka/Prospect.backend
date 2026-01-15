@@ -423,6 +423,7 @@ def get_prospects(
     t0 = time.perf_counter()
 
     # --- centre + bbox
+    geo_bbox = None
     if lat is not None and lon is not None:
         center_lat = float(lat)
         center_lon = float(lon)
@@ -432,18 +433,31 @@ def get_prospects(
         geo = _geocode(where.strip(), session)
         center_lat = float(geo["lat"])
         center_lon = float(geo["lon"])
+        geo_bbox = geo.get("bbox")  # bbox retourné par Nominatim (zone géographique)
 
-    # radius_km (obligatoire en pratique pour stabilité si tags est large)
+    # radius_km (optionnel)
+    # Si radius_km n'est pas fourni, on utilise le bbox du geocoding (zone géographique complète)
+    # mais on ne filtre pas les résultats par distance (pas de limite de rayon)
+    use_radius_filter = radius_km is not None
+    
     if radius_km is None:
-        # Sans radius, risque de zone énorme => Overpass errors.
-        raise ValueError("radius_km est requis (pour éviter les erreurs Overpass). Exemple: radius_km=2")
-
-    max_km = max(0.2, min(float(radius_km), MAX_RADIUS_KM))
-    min_km = max(0.0, float(radius_min_km or 0.0))
-    if min_km > 0 and min_km >= max_km:
-        raise ValueError("radius_min_km doit être strictement < radius_km.")
-
-    south, west, north, east = _bbox_around(center_lat, center_lon, max_km)
+        # Utiliser le bbox du geocoding si disponible, sinon MAX_RADIUS_KM
+        if geo_bbox:
+            # Utiliser le bbox retourné par Nominatim (zone géographique complète)
+            south, west, north, east = geo_bbox
+            max_km = None  # Pas de limite de rayon
+            min_km = 0.0
+        else:
+            # Fallback si pas de bbox (cas lat/lon sans where)
+            max_km = MAX_RADIUS_KM
+            min_km = 0.0
+            south, west, north, east = _bbox_around(center_lat, center_lon, max_km)
+    else:
+        max_km = max(0.2, min(float(radius_km), MAX_RADIUS_KM))
+        min_km = max(0.0, float(radius_min_km or 0.0))
+        if min_km > 0 and min_km >= max_km:
+            raise ValueError("radius_min_km doit être strictement < radius_km.")
+        south, west, north, east = _bbox_around(center_lat, center_lon, max_km)
 
     # --- filtres (category->tags déjà fait au controller si besoin)
     parsed = _parse_tags(tags)
@@ -460,21 +474,24 @@ def get_prospects(
     results = _parse_elements(data)
 
     # --- filtre anneau (min/max) côté serveur impossible proprement => on le fait ici (léger)
-    if min_km > 0:
-        filtered = []
-        for r in results:
-            d = _haversine_km(center_lat, center_lon, float(r["lat"]), float(r["lon"]))
-            if (d > min_km) and (d <= max_km):
-                filtered.append(r)
-        results = filtered
-    else:
-        # filtre max_km exact (bbox est approx)
-        filtered = []
-        for r in results:
-            d = _haversine_km(center_lat, center_lon, float(r["lat"]), float(r["lon"]))
-            if d <= max_km:
-                filtered.append(r)
-        results = filtered
+    # Seulement si radius_km était fourni (use_radius_filter = True)
+    if use_radius_filter:
+        if min_km > 0:
+            filtered = []
+            for r in results:
+                d = _haversine_km(center_lat, center_lon, float(r["lat"]), float(r["lon"]))
+                if (d > min_km) and (d <= max_km):
+                    filtered.append(r)
+            results = filtered
+        else:
+            # filtre max_km exact (bbox est approx)
+            filtered = []
+            for r in results:
+                d = _haversine_km(center_lat, center_lon, float(r["lat"]), float(r["lon"]))
+                if d <= max_km:
+                    filtered.append(r)
+            results = filtered
+    # Si radius_km n'était pas fourni, on garde tous les résultats du bbox (pas de filtre par distance)
 
     results = results[:limit]
 
@@ -482,8 +499,8 @@ def get_prospects(
         "where": where,
         "lat": center_lat,
         "lon": center_lon,
-        "radius_km": max_km,
-        "radius_min_km": min_km if min_km > 0 else None,
+        "radius_km": max_km if use_radius_filter else None,  # None si radius_km n'était pas fourni
+        "radius_min_km": min_km if (use_radius_filter and min_km > 0) else None,
         "bbox": [south, west, north, east],
         "tags": tags,
         "overpass_endpoint": OVERPASS_URL,
