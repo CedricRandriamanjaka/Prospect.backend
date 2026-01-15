@@ -20,8 +20,20 @@ class ProspectController:
         enrich: bool,
     ) -> Dict[str, Any]:
         # category -> tags si tags non fourni
+        # Gère plusieurs catégories séparées par des virgules
         if (not tags or not tags.strip()) and category and category.strip():
-            tags = category_to_tags(category)
+            # Si plusieurs catégories, les mapper séparément puis les joindre
+            categories = [c.strip() for c in category.split(",") if c.strip()]
+            if categories:
+                mapped_tags = []
+                for cat in categories:
+                    mapped = category_to_tags(cat)
+                    # Si le mapping retourne plusieurs tags (séparés par virgule), les ajouter individuellement
+                    if "," in mapped:
+                        mapped_tags.extend([t.strip() for t in mapped.split(",") if t.strip()])
+                    else:
+                        mapped_tags.append(mapped)
+                tags = ",".join(mapped_tags)
 
         results, meta = get_prospects(
             where=where,

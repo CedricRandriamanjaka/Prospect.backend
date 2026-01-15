@@ -19,7 +19,6 @@ import {
   FiSearch,
   FiMapPin,
   FiX,
-  FiTag,
   FiFilter,
 } from "react-icons/fi"
 
@@ -167,134 +166,6 @@ const OSM_CATEGORIES = [
   { value: "physiotherapist", label: "Kinésithérapeute" },
 ]
 
-// Liste complète des tags OSM avec libellés grand public
-const OSM_TAGS = [
-  { value: "amenity=restaurant", label: "Restaurant" },
-  { value: "amenity=cafe", label: "Café" },
-  { value: "amenity=bar", label: "Bar" },
-  { value: "amenity=fast_food", label: "Restauration rapide" },
-  { value: "amenity=food_court", label: "Food court" },
-  { value: "amenity=ice_cream", label: "Glacier" },
-  { value: "amenity=pharmacy", label: "Pharmacie" },
-  { value: "amenity=hospital", label: "Hôpital" },
-  { value: "amenity=clinic", label: "Clinique" },
-  { value: "amenity=doctors", label: "Cabinet médical" },
-  { value: "amenity=dentist", label: "Dentiste" },
-  { value: "amenity=veterinary", label: "Vétérinaire" },
-  { value: "amenity=bank", label: "Banque" },
-  { value: "amenity=atm", label: "Distributeur automatique" },
-  { value: "amenity=post_office", label: "Bureau de poste" },
-  { value: "amenity=library", label: "Bibliothèque" },
-  { value: "amenity=parking", label: "Parking" },
-  { value: "amenity=fuel", label: "Station-service" },
-  { value: "amenity=charging_station", label: "Borne de recharge" },
-  { value: "amenity=car_rental", label: "Location de voiture" },
-  { value: "amenity=car_wash", label: "Lavage auto" },
-  { value: "amenity=car_repair", label: "Garage automobile" },
-  { value: "amenity=police", label: "Commissariat" },
-  { value: "amenity=fire_station", label: "Caserne de pompiers" },
-  { value: "amenity=townhall", label: "Mairie" },
-  { value: "amenity=courthouse", label: "Palais de justice" },
-  { value: "amenity=embassy", label: "Ambassade" },
-  { value: "amenity=community_centre", label: "Centre communautaire" },
-  { value: "amenity=place_of_worship", label: "Lieu de culte" },
-  { value: "shop=supermarket", label: "Supermarché" },
-  { value: "shop=convenience", label: "Épicerie" },
-  { value: "shop=bakery", label: "Boulangerie" },
-  { value: "shop=butcher", label: "Boucherie" },
-  { value: "shop=seafood", label: "Poissonnerie" },
-  { value: "shop=cheese", label: "Fromagerie" },
-  { value: "shop=wine", label: "Caviste" },
-  { value: "shop=alcohol", label: "Cave à vin" },
-  { value: "shop=beverages", label: "Boissons" },
-  { value: "shop=clothes", label: "Vêtements" },
-  { value: "shop=shoes", label: "Chaussures" },
-  { value: "shop=jewelry", label: "Bijouterie" },
-  { value: "shop=watches", label: "Horlogerie" },
-  { value: "shop=beauty", label: "Institut de beauté" },
-  { value: "shop=cosmetics", label: "Cosmétiques" },
-  { value: "shop=perfumery", label: "Parfumerie" },
-  { value: "shop=hairdresser", label: "Coiffeur" },
-  { value: "shop=optician", label: "Opticien" },
-  { value: "shop=florist", label: "Fleuriste" },
-  { value: "shop=gift", label: "Magasin de cadeaux" },
-  { value: "shop=toy", label: "Jouets" },
-  { value: "shop=book", label: "Librairie" },
-  { value: "shop=computer", label: "Informatique" },
-  { value: "shop=mobile_phone", label: "Téléphonie mobile" },
-  { value: "shop=electronics", label: "Électronique" },
-  { value: "shop=furniture", label: "Meubles" },
-  { value: "shop=hardware", label: "Quincaillerie" },
-  { value: "shop=paint", label: "Peinture" },
-  { value: "shop=garden_centre", label: "Jardinerie" },
-  { value: "shop=pet", label: "Animalerie" },
-  { value: "shop=bicycle", label: "Vélo" },
-  { value: "shop=car", label: "Voiture" },
-  { value: "shop=car_repair", label: "Garage" },
-  { value: "shop=motorcycle", label: "Moto" },
-  { value: "shop=travel_agency", label: "Agence de voyage" },
-  { value: "shop=art", label: "Art" },
-  { value: "shop=music", label: "Musique" },
-  { value: "shop=photo", label: "Photo" },
-  { value: "shop=camera", label: "Appareil photo" },
-  { value: "tourism=hotel", label: "Hôtel" },
-  { value: "tourism=hostel", label: "Auberge de jeunesse" },
-  { value: "tourism=motel", label: "Motel" },
-  { value: "tourism=guest_house", label: "Chambre d'hôtes" },
-  { value: "tourism=apartment", label: "Appartement" },
-  { value: "tourism=museum", label: "Musée" },
-  { value: "tourism=gallery", label: "Galerie d'art" },
-  { value: "tourism=zoo", label: "Zoo" },
-  { value: "tourism=aquarium", label: "Aquarium" },
-  { value: "tourism=theme_park", label: "Parc d'attractions" },
-  { value: "tourism=attraction", label: "Attraction touristique" },
-  { value: "tourism=information", label: "Office de tourisme" },
-  { value: "leisure=fitness_centre", label: "Centre de fitness" },
-  { value: "leisure=gym", label: "Salle de sport" },
-  { value: "leisure=swimming_pool", label: "Piscine" },
-  { value: "leisure=spa", label: "Spa" },
-  { value: "leisure=sports_centre", label: "Complexe sportif" },
-  { value: "leisure=stadium", label: "Stade" },
-  { value: "leisure=park", label: "Parc" },
-  { value: "leisure=playground", label: "Terrain de jeu" },
-  { value: "leisure=golf_course", label: "Golf" },
-  { value: "leisure=marina", label: "Marina" },
-  { value: "leisure=beach_resort", label: "Station balnéaire" },
-  { value: "office=insurance", label: "Assurance" },
-  { value: "office=lawyer", label: "Avocat" },
-  { value: "office=accountant", label: "Expert-comptable" },
-  { value: "office=notary", label: "Notaire" },
-  { value: "office=estate_agent", label: "Agence immobilière" },
-  { value: "office=travel_agent", label: "Agence de voyage" },
-  { value: "office=financial", label: "Services financiers" },
-  { value: "office=company", label: "Entreprise" },
-  { value: "office=ngo", label: "ONG" },
-  { value: "office=political_party", label: "Parti politique" },
-  { value: "office=religion", label: "Organisation religieuse" },
-  { value: "healthcare=hospital", label: "Hôpital" },
-  { value: "healthcare=clinic", label: "Clinique" },
-  { value: "healthcare=doctor", label: "Médecin" },
-  { value: "healthcare=dentist", label: "Dentiste" },
-  { value: "healthcare=physiotherapist", label: "Kinésithérapeute" },
-  { value: "healthcare=psychologist", label: "Psychologue" },
-  { value: "healthcare=veterinary", label: "Vétérinaire" },
-  { value: "healthcare=pharmacy", label: "Pharmacie" },
-  { value: "healthcare=optometrist", label: "Optométriste" },
-  { value: "healthcare=midwife", label: "Sage-femme" },
-  { value: "healthcare=audiologist", label: "Audiologiste" },
-  { value: "craft=beekeeper", label: "Apiculteur" },
-  { value: "craft=blacksmith", label: "Forgeron" },
-  { value: "craft=brewery", label: "Brasserie" },
-  { value: "craft=carpenter", label: "Menuisier" },
-  { value: "craft=electrician", label: "Électricien" },
-  { value: "craft=gardener", label: "Jardinier" },
-  { value: "craft=key_cutter", label: "Serrurier" },
-  { value: "craft=plumber", label: "Plombier" },
-  { value: "craft=pottery", label: "Potier" },
-  { value: "craft=stonemason", label: "Tailleur de pierre" },
-  { value: "craft=tiler", label: "Carreleur" },
-  { value: "craft=winery", label: "Vigneron" },
-]
 
 export default function SearchForm({
   onSearch,
@@ -303,7 +174,6 @@ export default function SearchForm({
   initialWhere = "",
   initialRadius = 5,
   initialRadiusMin = 0,
-  initialTags = [],
   initialCategories = [],
   initialLimit = 20,
   initialEnrich = false,
@@ -312,14 +182,12 @@ export default function SearchForm({
   const [useRadius, setUseRadius] = useState(initialRadius > 0)
   const [radius, setRadius] = useState(Math.max(0, Math.min(initialRadius || 5, 50)))
   const [radiusMin, setRadiusMin] = useState(Math.max(0, Math.min(initialRadiusMin, Math.max(0, (initialRadius || 5) - 0.5))))
-  const [tags, setTags] = useState(initialTags)
   const [categories, setCategories] = useState(initialCategories)
   const [limit, setLimit] = useState(initialLimit)
   const [enrich, setEnrich] = useState(initialEnrich)
   const [showSuggestions, setShowSuggestions] = useState(false)
   const [filteredCities, setFilteredCities] = useState([])
   const [categorySearch, setCategorySearch] = useState("")
-  const [tagSearch, setTagSearch] = useState("")
   const inputRef = useRef(null)
   const suggestionsRef = useRef(null)
 
@@ -369,10 +237,6 @@ export default function SearchForm({
     setShowSuggestions(false)
   }
 
-  const handleRemoveTag = (tagToRemove) => {
-    setTags(tags.filter((t) => t !== tagToRemove))
-  }
-
   const handleRemoveCategory = (catToRemove) => {
     setCategories(categories.filter((c) => c !== catToRemove))
   }
@@ -380,12 +244,6 @@ export default function SearchForm({
   const handleAddCategory = (category) => {
     if (!categories.includes(category)) {
       setCategories([...categories, category])
-    }
-  }
-
-  const handleAddTag = (tag) => {
-    if (!tags.includes(tag)) {
-      setTags([...tags, tag])
     }
   }
 
@@ -402,7 +260,7 @@ export default function SearchForm({
       }
     }
     
-    if (tags.length > 0) params.append("tags", tags.join(","))
+    // Les catégories sont converties en tags OSM par le backend
     if (categories.length > 0) params.append("category", categories.join(","))
     
     // Nombre de résultats
@@ -418,7 +276,7 @@ export default function SearchForm({
     onSearch(params.toString())
   }
 
-  const hasFilters = where || tags.length > 0 || categories.length > 0
+  const hasFilters = where || categories.length > 0
 
   // Filtrer les catégories selon la recherche
   const filteredCategories = OSM_CATEGORIES.filter((cat) =>
@@ -426,11 +284,6 @@ export default function SearchForm({
     cat.value.toLowerCase().includes(categorySearch.toLowerCase())
   )
 
-  // Filtrer les tags selon la recherche
-  const filteredTags = OSM_TAGS.filter((tag) =>
-    tag.label.toLowerCase().includes(tagSearch.toLowerCase()) ||
-    tag.value.toLowerCase().includes(tagSearch.toLowerCase())
-  )
 
   return (
     <Card.Root
@@ -805,89 +658,6 @@ export default function SearchForm({
                     </Box>
                   ))}
                   {filteredCategories.length === 0 && (
-                    <Text fontSize="xs" color="fg.muted" px="3" py="2">
-                      Aucun résultat
-                    </Text>
-                  )}
-                </VStack>
-              </Box>
-            </Box>
-          </VStack>
-
-          {/* Critères de recherche avancés (Tags) */}
-          <VStack gap="3" align="stretch">
-            <VStack align="start" gap="1">
-              <HStack gap="2">
-                <FiTag size="16" color="var(--chakra-colors-blue-500)" />
-                <Text fontWeight="600" fontSize="sm">
-                  Critères de recherche avancés
-                </Text>
-              </HStack>
-              <Text fontSize="xs" color="fg.muted">
-                Affinez votre recherche avec des critères spécifiques (optionnel)
-              </Text>
-            </VStack>
-
-            {tags.length > 0 && (
-              <HStack gap="2" flexWrap="wrap">
-                {tags.map((tag) => {
-                  const tagInfo = OSM_TAGS.find((t) => t.value === tag)
-                  return (
-                    <Badge
-                      key={tag}
-                      colorPalette="green"
-                      variant="solid"
-                      px="2"
-                      py="1"
-                      fontSize="xs"
-                      cursor="pointer"
-                      onClick={() => handleRemoveTag(tag)}
-                      _hover={{ opacity: 0.8 }}
-                    >
-                      {tagInfo?.label || tag}
-                      <Box as="span" ml="1">×</Box>
-                    </Badge>
-                  )
-                })}
-              </HStack>
-            )}
-
-            <Box>
-              <Input
-                placeholder="Rechercher un critère..."
-                value={tagSearch}
-                onChange={(e) => setTagSearch(e.target.value)}
-                size="sm"
-                mb="2"
-              />
-              <Box
-                maxH="200px"
-                overflowY="auto"
-                borderWidth="1px"
-                borderColor="border"
-                rounded="md"
-                p="2"
-                bg="bg.subtle"
-              >
-                <VStack align="stretch" gap="1">
-                  {filteredTags.slice(0, 20).map((tag) => (
-                    <Box
-                      key={tag.value}
-                      px="3"
-                      py="2"
-                      cursor="pointer"
-                      rounded="sm"
-                      _hover={{ bg: "bg.emphasized" }}
-                      onClick={() => {
-                        handleAddTag(tag.value)
-                        setTagSearch("")
-                      }}
-                      display={tags.includes(tag.value) ? "none" : "block"}
-                    >
-                      <Text fontSize="sm">{tag.label}</Text>
-                    </Box>
-                  ))}
-                  {filteredTags.length === 0 && (
                     <Text fontSize="xs" color="fg.muted" px="3" py="2">
                       Aucun résultat
                     </Text>
