@@ -60,6 +60,7 @@ class ProspectController:
         ex_brands = [x.lower() for x in _csv(exclude_brands)]
 
         # Astuce: on récupère plus que number pour permettre filtrage/dedupe
+        # Maintenant que toutes les requêtes utilisent des bbox (plus rapides), on peut utiliser le multiplicateur standard
         fetch_number = min(max(int(number) * 3, int(number)), 200)
 
         # Récupérer depuis OSM

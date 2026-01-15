@@ -517,6 +517,7 @@ def get_prospects(
     - Sinon comportement standard.
     """
     number = max(1, min(int(number), 200))
+    # Maintenant que toutes les requêtes utilisent des bbox (plus rapides), on peut utiliser le multiplicateur standard
     requested_count = min(number * 2, 500)
 
     s = requests.Session()
@@ -530,64 +531,105 @@ def get_prospects(
     # Mode lat/lon direct
     # -------------------------
     if lat is not None and lon is not None:
-        # Limite réduite à 20km pour éviter les timeouts
-        used_max_km = _clamp_radius_km(radius_km if radius_km is not None else 5.0, 0.2, 20.0)
-        used_min_km = _clamp_radius_km(radius_min_km, 0.0, 19.999) if radius_min_km is not None else 0.0
-
-        if used_min_km >= used_max_km:
-            raise ValueError("radius_min_km doit être strictement < radius_km")
-
-        max_m = int(used_max_km * 1000)
-        min_m = int(used_min_km * 1000)
-
-        if used_min_km > 0:
-            q = _build_query_around_annulus(filters, float(lat), float(lon), min_m, max_m, requested_count, osm_has=osm_has)
-            mode = "around_annulus"
-        else:
-            q = _build_query_around(filters, float(lat), float(lon), max_m, requested_count, osm_has=osm_has)
-            mode = "around"
-
-        data = _overpass_request(q, s)
-        results = _parse_elements(data, fallback_city=query_text or "coords")
+        # OPTIMISATION: Convertir lat/lon + radius en bbox au lieu d'utiliser les requêtes "around"
+        # Les requêtes "around" sont très lourdes et timeout facilement, surtout dans les zones denses
+        # On utilise un bbox approximatif qui couvre le rayon demandé
         
-        # Filtrer l'anneau côté client si nécessaire (plus rapide que requête Overpass complexe)
-        if used_min_km > 0:
-            center_lat = float(lat)
-            center_lon = float(lon)
-            min_m_sq = min_m * min_m
-            max_m_sq = max_m * max_m
+        center_lat = float(lat)
+        center_lon = float(lon)
+        
+        # Si radius_km est fourni, créer un bbox approximatif
+        if radius_km is not None:
+            used_max_km = _clamp_radius_km(radius_km, 0.2, 50.0)  # Max 50km pour éviter les bbox trop grands
             
-            filtered_results = []
-            for r in results:
-                r_lat = r.get("lat")
-                r_lon = r.get("lon")
-                if r_lat is None or r_lon is None:
-                    continue
-                
-                # Distance approximative (formule de Haversine simplifiée pour performance)
-                dlat = math.radians(r_lat - center_lat)
-                dlon = math.radians(r_lon - center_lon)
-                a = math.sin(dlat/2)**2 + math.cos(math.radians(center_lat)) * math.cos(math.radians(r_lat)) * math.sin(dlon/2)**2
-                c = 2 * math.asin(math.sqrt(a))
-                distance_m = 6371000 * c  # Rayon Terre en mètres
-                distance_m_sq = distance_m * distance_m
-                
-                # Garder si dans l'anneau (min < distance <= max)
-                if min_m_sq < distance_m_sq <= max_m_sq:
-                    filtered_results.append(r)
+            # Conversion approximative: 1 degré ≈ 111 km
+            # Pour longitude, on ajuste selon la latitude
+            delta_lat = used_max_km / 111.0
+            delta_lon = used_max_km / (111.0 * math.cos(math.radians(center_lat)))
             
-            results = filtered_results
-
-        meta = {
-            "mode": mode,
-            "where": query_text,
-            "lat": lat,
-            "lon": lon,
-            "radius_km": used_max_km,
-            "radius_min_km": used_min_km,
-            "tags": filters,
-        }
-        return results[:number], meta
+            south = center_lat - delta_lat
+            north = center_lat + delta_lat
+            west = center_lon - delta_lon
+            east = center_lon + delta_lon
+            
+            # Clamp pour éviter les coordonnées invalides
+            south = max(-90.0, min(90.0, south))
+            north = max(-90.0, min(90.0, north))
+            west = max(-180.0, min(180.0, west))
+            east = max(-180.0, min(180.0, east))
+            
+            # Utiliser bbox au lieu de "around"
+            q = _build_query_bbox(filters, south, west, north, east, requested_count, osm_has=osm_has)
+            data = _overpass_request(q, s)
+            results = _parse_elements(data, fallback_city=query_text or "coords")
+            
+            # Filtrer par distance côté client si radius_min_km est fourni (anneau)
+            if radius_min_km is not None and radius_min_km > 0:
+                used_min_km = _clamp_radius_km(radius_min_km, 0.0, used_max_km - 0.001)
+                if used_min_km >= used_max_km:
+                    raise ValueError("radius_min_km doit être strictement < radius_km")
+                
+                min_m_sq = (used_min_km * 1000) ** 2
+                max_m_sq = (used_max_km * 1000) ** 2
+                
+                filtered_results = []
+                for r in results:
+                    r_lat = r.get("lat")
+                    r_lon = r.get("lon")
+                    if r_lat is None or r_lon is None:
+                        continue
+                    
+                    # Distance approximative (formule de Haversine simplifiée)
+                    dlat = math.radians(r_lat - center_lat)
+                    dlon = math.radians(r_lon - center_lon)
+                    a = math.sin(dlat/2)**2 + math.cos(math.radians(center_lat)) * math.cos(math.radians(r_lat)) * math.sin(dlon/2)**2
+                    c = 2 * math.asin(math.sqrt(a))
+                    distance_m = 6371000 * c
+                    distance_m_sq = distance_m * distance_m
+                    
+                    # Garder si dans l'anneau (min < distance <= max)
+                    if min_m_sq < distance_m_sq <= max_m_sq:
+                        filtered_results.append(r)
+                
+                results = filtered_results
+                mode = "latlon_bbox_annulus"
+            else:
+                mode = "latlon_bbox"
+            
+            meta = {
+                "mode": mode,
+                "where": query_text,
+                "lat": lat,
+                "lon": lon,
+                "bbox": [south, west, north, east],
+                "radius_km": used_max_km,
+                "radius_min_km": radius_min_km if (radius_min_km is not None and radius_min_km > 0) else None,
+                "tags": filters,
+            }
+            return results[:number], meta
+        else:
+            # Pas de radius_km: utiliser un petit bbox par défaut (1km)
+            delta_lat = 1.0 / 111.0
+            delta_lon = 1.0 / (111.0 * math.cos(math.radians(center_lat)))
+            
+            south = center_lat - delta_lat
+            north = center_lat + delta_lat
+            west = center_lon - delta_lon
+            east = center_lon + delta_lon
+            
+            q = _build_query_bbox(filters, south, west, north, east, requested_count, osm_has=osm_has)
+            data = _overpass_request(q, s)
+            results = _parse_elements(data, fallback_city=query_text or "coords")
+            
+            meta = {
+                "mode": "latlon_bbox",
+                "where": query_text,
+                "lat": lat,
+                "lon": lon,
+                "bbox": [south, west, north, east],
+                "tags": filters,
+            }
+            return results[:number], meta
 
     # -------------------------
     # Mode where/city
@@ -598,7 +640,14 @@ def get_prospects(
     geo = _geocode(query_text, s)
 
     # Si radius_km fourni => around (ou anneau)
-    if radius_km is not None:
+    # OPTIMISATION: Si pas de filtres spécifiques (tags vide) OU si has est fourni, utiliser bbox au lieu de rayon
+    # car les requêtes "around" sans filtres sont très lourdes et timeout facilement
+    # et les requêtes "around" avec has génèrent beaucoup de combinaisons de tags qui multiplient les requêtes
+    has_specific_filters = tags and tags.strip()
+    # Si osm_has est fourni, on évite le mode "around" car ça génère trop de combinaisons
+    use_bbox_instead = not has_specific_filters or (osm_has and len(osm_has) > 0)
+    
+    if radius_km is not None and has_specific_filters and not use_bbox_instead:
         # Limite réduite à 20km pour éviter les timeouts
         used_max_km = _clamp_radius_km(radius_km, 0.2, 20.0)
         used_min_km = _clamp_radius_km(radius_min_km, 0.0, 19.999) if radius_min_km is not None else 0.0

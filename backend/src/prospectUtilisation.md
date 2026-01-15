@@ -11,9 +11,10 @@
 ### 1) Localisation (obligatoire : 1 mode)
 - Mode texte
   - `where` (str) ou `city` (str, ancien)
+  - `radius_km` (float, optionnel) : **Note** : Si utilisé avec `where` sans `category` ni `tags`, ou avec `has`, le système utilise automatiquement un bbox au lieu d'un rayon pour éviter les timeouts.
 - Mode carte
   - `lat` (float), `lon` (float)
-  - `radius_km` (float, optionnel)
+  - `radius_km` (float, optionnel) : **Note** : Le rayon est automatiquement converti en zone rectangulaire (bbox) pour des raisons de performance. Les requêtes "around" sont désactivées car elles timeout facilement dans les zones denses. Le bbox couvre approximativement le rayon demandé.
 
 ### 1bis) Pagination par anneau (optionnel)
 Permet de demander une zone entre 2 rayons (ex: commencer après 2 km).
@@ -21,7 +22,8 @@ Permet de demander une zone entre 2 rayons (ex: commencer après 2 km).
   - Utilisé seulement si `radius_km` est fourni
   - Doit respecter : `0 <= radius_min_km < radius_km`
   - Si absent ou `0`, comportement standard (0 → radius_km)
-  - Si > 0, la recherche se fait dans l’anneau : `(radius_min_km, radius_km]`
+  - Si > 0, la recherche se fait dans l'anneau : `(radius_min_km, radius_km]`
+  - **Note** : Le filtrage de l'anneau est effectué côté client après récupération des résultats dans le bbox, pour des raisons de performance.
 
 Exemples:
 - Page 1 : `radius_min_km=0&radius_km=2`
@@ -60,6 +62,7 @@ Cela permet d'enrichir les prospects les plus pertinents en premier, réduisant 
 - `has` (csv) → `website,email,phone,whatsapp`
   - **Optimisation** : Si `has` est fourni, le filtre est appliqué directement dans la requête Overpass (pushdown), ce qui réduit le nombre de résultats récupérés et améliore les performances.
   - Ex: `has=website` → récupère uniquement les POI ayant un site web dans OSM
+  - **Note** : Si `has` est utilisé avec `where` + `radius_km`, le système utilise automatiquement un bbox au lieu d'un rayon pour éviter les timeouts (les combinaisons de tags générées par `has` multiplient le nombre de requêtes Overpass).
 - `min_contacts` (int, défaut 0, 0..4)
 - `exclude_names` (csv) → exclure mots dans `nom`
 - `exclude_brands` (csv) → exclure marque/opérateur
@@ -98,9 +101,13 @@ Cela permet d'enrichir les prospects les plus pertinents en premier, réduisant 
 
 ### 3) Clic carte + distance
 `/prospects?lat=48.8566&lon=2.3522&radius_km=2&category=hotel&sort=distance&number=30`
+- Le `radius_km` est automatiquement converti en bbox approximatif pour éviter les timeouts
+- Le bbox couvre la zone du rayon demandé
 
 ### 3bis) Anneau (commencer après 2 km)
 `/prospects?lat=48.8566&lon=2.3522&radius_min_km=2&radius_km=4&category=hotel&sort=distance&number=30`
+- Le bbox couvre le rayon maximum (`radius_km=4`)
+- Le filtrage de l'anneau (`radius_min_km=2`) est effectué côté client après récupération
 
 ### 4) Uniquement contactables
 `/prospects?where=Paris&category=spa&has=email,phone&min_contacts=1&number=50`
@@ -109,6 +116,7 @@ Cela permet d'enrichir les prospects les plus pertinents en premier, réduisant 
 `/prospects?where=Maurice&category=hotel&has=website&min_contacts=1&number=30&enrich_max=5`
 - Le filtre `has=website` est appliqué directement dans Overpass, réduisant le nombre de résultats récupérés
 - L'enrichissement est plus rapide car on enrichit uniquement les prospects déjà contactables
+- **Note** : Si `has` est utilisé avec `where` + `radius_km`, le système utilise automatiquement un bbox au lieu d'un rayon pour éviter les timeouts
 
 ### 5) Enrichissement (recommandé)
 `/prospects?where=Paris&category=hotel&enrich_max=10&number=30`

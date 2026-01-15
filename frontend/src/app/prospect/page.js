@@ -52,7 +52,7 @@ const HELP = {
   searchMode:
     "Choisir la méthode. Texte = recherche par lieu. Carte = cliquer un point puis lancer la prospection.",
   where: "Lieu libre: pays, ville, quartier, adresse.",
-  radiusKm: "Rayon maximum autour du point ou du lieu.",
+  radiusKm: "Rayon maximum autour du point ou du lieu. Converti automatiquement en zone rectangulaire (bbox) pour des raisons de performance.",
   radiusMinKm: "Exclut le centre: utile pour éviter trop de résultats très proches.",
   number: "Nombre maximum de résultats retournés par le backend.",
   tags: "Tags OSM séparés par virgules. Exemple: restaurant,hotel,pharmacy",
