@@ -36,12 +36,17 @@ Exemples:
 - `tags` (str)  
   - Ex: `amenity=restaurant,tourism=hotel`
   - Ex: `restaurant,hotel`
+  - Ex: `shop=beauty,shop=cosmetics,shop=perfumery` (pour cosmétiques)
+  - **Tags OSM courants** : `amenity=*`, `shop=*`, `tourism=*`, `office=*`, `craft=*`, `leisure=*`, `healthcare=*`, `education=*`
 - `category` (str, simple)  
-  - Ex: `restaurant`, `hotel`, `spa`, `bakery`  
+  - Ex: `restaurant`, `hotel`, `spa`, `bakery`, `pharmacy`  
   - Utilisé seulement si `tags` est vide
+  - **Note** : Les catégories disponibles sont limitées. Pour les cosmétiques, utiliser `tags=shop=beauty,shop=cosmetics,shop=perfumery` directement
 
 ### 3) Résultats
 - `number` (int, défaut 20, 1..200) → nb final renvoyé
+- **Limite** : Maximum 200 résultats par requête
+- **Pour obtenir plus de résultats** : Utiliser la pagination par anneaux (voir section 1bis) ou faire plusieurs requêtes avec des zones différentes
 
 ### 4) Enrichissement (scraping)
 - `enrich_max` (int, défaut 10, 0..200)
@@ -132,3 +137,32 @@ Cela permet d'enrichir les prospects les plus pertinents en premier, réduisant 
 - Page 1 : `/prospects?where=Paris&radius_min_km=0&radius_km=2&category=restaurant&number=20`
 - Page 2 : `/prospects?where=Paris&radius_min_km=2&radius_km=4&category=restaurant&number=20`
 - Page 3 : `/prospects?where=Paris&radius_min_km=4&radius_km=6&category=restaurant&number=20`
+
+### 9) Cas d'usage : Grandes quantités (300-10000+ résultats)
+**Exemple : Trouver 1000 sociétés de cosmétiques à Maurice**
+
+**Stratégie 1 : Pagination par anneaux**
+- Faire plusieurs requêtes avec `radius_min_km` et `radius_km` croissants
+- Chaque requête peut retourner jusqu'à 200 résultats
+- Exemple pour 1000 résultats : 5 requêtes de 200 résultats chacune
+  - Page 1 : `/prospects?where=Maurice&radius_min_km=0&radius_km=5&tags=shop=beauty,shop=cosmetics,shop=perfumery&number=200`
+  - Page 2 : `/prospects?where=Maurice&radius_min_km=5&radius_km=10&tags=shop=beauty,shop=cosmetics,shop=perfumery&number=200`
+  - Page 3 : `/prospects?where=Maurice&radius_min_km=10&radius_km=15&tags=shop=beauty,shop=cosmetics,shop=perfumery&number=200`
+  - Page 4 : `/prospects?where=Maurice&radius_min_km=15&radius_km=20&tags=shop=beauty,shop=cosmetics,shop=perfumery&number=200`
+  - Page 5 : `/prospects?where=Maurice&radius_min_km=20&radius_km=25&tags=shop=beauty,shop=cosmetics,shop=perfumery&number=200`
+
+**Stratégie 2 : Zones géographiques différentes**
+- Diviser le pays en régions/villes et faire une requête par zone
+- Exemple : `/prospects?where=Port Louis&tags=shop=beauty,shop=cosmetics&number=200`
+- Exemple : `/prospects?where=Curepipe&tags=shop=beauty,shop=cosmetics&number=200`
+
+**Stratégie 3 : Combinaison tags**
+- Utiliser plusieurs tags OSM pertinents pour maximiser les résultats
+- Exemple : `/prospects?where=Maurice&tags=shop=beauty,shop=cosmetics,shop=perfumery,shop=pharmacy,amenity=pharmacy&number=200`
+- Les pharmacies vendent souvent des cosmétiques
+
+**Limitations importantes :**
+- Maximum 200 résultats par requête (limite technique)
+- La qualité des données OSM varie selon les régions (Maurice peut avoir moins de données que Paris)
+- Pour 10000+ résultats, il faudra faire 50+ requêtes (automatisation recommandée)
+- L'enrichissement (`enrich_max`) est limité à 200 par requête
